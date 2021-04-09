@@ -7,7 +7,7 @@
 #include <DirectXColors.h>
 #include "RootSignatureGenerator.h"
 
-static D3D12App *CreateNBodyGravityApp(HINSTANCE hInstance);
+static D3D12RendererContext *CreateNBodyGravityApp(HINSTANCE hInstance);
 
 int main() {
 
@@ -18,7 +18,7 @@ int main() {
     _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 
-    D3D12App *pTheApp = CreateNBodyGravityApp(NULL);
+    D3D12RendererContext *pTheApp = CreateNBodyGravityApp(NULL);
     if (FAILED(hr = pTheApp->Initialize())) {
         SAFE_DELETE(pTheApp);
         return hr;
@@ -88,7 +88,7 @@ public:
 UploadBuffer FrameResources::ParticleParamCB;
 UploadBuffer FrameResources::DrawParticleCB;
 
-class NBodyGravityApp : public D3D12App {
+class NBodyGravityApp : public D3D12RendererContext {
 public:
     NBodyGravityApp(HINSTANCE hInstance);
     ~NBodyGravityApp();
@@ -155,12 +155,12 @@ private:
 };
 
 
-D3D12App *CreateNBodyGravityApp(HINSTANCE hInstance) {
+D3D12RendererContext *CreateNBodyGravityApp(HINSTANCE hInstance) {
     return new NBodyGravityApp(hInstance);
 }
 
 NBodyGravityApp::NBodyGravityApp(HINSTANCE hInstance)
-    : D3D12App(hInstance) {
+    : D3D12RendererContext(hInstance) {
 }
 
 NBodyGravityApp::~NBodyGravityApp() {

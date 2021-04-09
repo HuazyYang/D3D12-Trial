@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.0.0)
-
-# set common build facilities so sub module can find it
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR})
+project(D3D12-Trial)
 
 include(BuildUtilities.cmake)
 
@@ -28,14 +26,13 @@ endif()
 set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 set(COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Common)
 
-add_subdirectory(${THIRD_PARTY_DIR}/glfw ${CMAKE_CURRENT_BINARY_DIR}/glfw)
-# you still need DirectXTex package
-
 include_directories(
   $ENV{VK_SDK_PATH}/include
+  ${THIRD_PARTY_DIR}
   ${THIRD_PARTY_DIR}/DirectXTex/DirectXTex
   ${COMMON_SOURCE_DIR}
   ${THIRD_PARTY_DIR}/glfw/include
+  ${THIRD_PARTY_DIR}/dxc/inc # dxc headers
 )
 
 if(CMAKE_BUILD_TYPE)
@@ -48,6 +45,7 @@ if(CMAKE_BUILD_TYPE)
 
   link_directories(${CMAKE_CURRENT_BINARY_DIR}/glfw/src/${TRIAL_OUTDIR_END_SUFFIX})
   link_directories(${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX})
+  link_directories(${THIRD_PARTY_DIR}/dxc/lib/x64)
 
 else()
   message(FATAL_ERROR "Build type unspecified!")
@@ -59,9 +57,9 @@ if(MSVC)
 add_link_options("/NODEFAULTLIB:libcmt.lib")
 endif(MSVC)
 
-add_subdirectory(D3DTutorial)
 add_subdirectory(Common)
-add_subdirectory(NBodyGravity)
+add_subdirectory(D3DTutorial)
+# add_subdirectory(NBodyGravity)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})

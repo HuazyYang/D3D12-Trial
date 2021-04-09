@@ -21,13 +21,13 @@
 using namespace DirectX;
 using namespace Microsoft::WRL;
 
-D3D12App *CreateLandAndWavesApp(HINSTANCE hInstance);
+D3D12RendererContext *CreateLandAndWavesApp(HINSTANCE hInstance);
 
 
 int main() {
 
     HRESULT hr;
-    D3D12App *pTheApp;
+    D3D12RendererContext *pTheApp;
 
 
     // Enable run-time memory check for debug builds.
@@ -191,7 +191,7 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> GetStaticSamplers() {
         anisotropicWrap, anisotropicClamp, depthPointBias };
 }
 
-class LandAndWavesApp : public D3D12App {
+class LandAndWavesApp : public D3D12RendererContext {
 public:
     LandAndWavesApp(HINSTANCE hIntance);
     ~LandAndWavesApp();
@@ -259,12 +259,12 @@ private:
     POINT m_ptLastMousePos;
 };
 
-D3D12App *CreateLandAndWavesApp(HINSTANCE hInstance) {
+D3D12RendererContext *CreateLandAndWavesApp(HINSTANCE hInstance) {
     return new LandAndWavesApp(hInstance);
 }
 
 LandAndWavesApp::LandAndWavesApp(HINSTANCE hInstance)
-    : D3D12App(hInstance) {
+    : D3D12RendererContext(hInstance) {
     m_Camera.SetOrbit(50.0f, 1.5f * XM_PI, XM_PIDIV2 - 0.1f);
 
     m_aLights.AmbientStrength = { 0.25f, 0.25f, 0.35f, 1.0f };

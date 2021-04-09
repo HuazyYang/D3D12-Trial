@@ -1,38 +1,33 @@
-#ifndef D3D12_APP_H
-#define D3D12_APP_H
-#include <windows.h>
+#pragma once
 #include <string>
 #include <vector>
 #include <sstream>
 #include <iomanip>
 #include "d3dUtils.h"
-#include "GameTimer.h"
 
-
-
-class D3D12App {
+class D3D12RendererContext {
 public:
-    D3D12App(HINSTANCE hInstance = nullptr);
-    virtual ~D3D12App();
+    D3D12RendererContext();
+    virtual ~D3D12RendererContext();
 
-    virtual HRESULT Initialize();
-    HRESULT Run();
-
+    HRESULT Initialize(HWND hwnd, int cx, int cy);
+    void Update( float fTime, float fElapsedTime );
+    void RenderFrame( float fTime, float fElapsedTime );
+    void Destroy();
+    HRESULT ResizeFrame(int cx, int cy);
 protected:
+    virtual HRESULT OnInitPipelines() { return S_OK; }
+    virtual void OnFrameMoved(float fTime, float fElapsedTime) {}
+    virtual void OnRenderFrame(float fTime, float fElapsedTime) {}
+    virtual void OnResizeFrame(int cx, int cy) {}
+    virtual void OnDestroy() {}
     /// Override the RTV and DSV descriptor size.
     virtual UINT GetExtraRTVDescriptorCount() const;
     virtual UINT GetExtraDSVDescriptorCount() const;
 
-    static LRESULT CALLBACK MainWndProc( HWND hwnd, UINT uMsg, WPARAM wp, LPARAM lp );
-    virtual void Update( float fTime, float fElapsedTime );
-    virtual void RenderFrame( float fTime, float fElapsedTime );
-
     ID3D12Resource *CurrentBackBuffer() const;
     D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView() const;
     D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView() const;
-
-    HRESULT InitWindow();
-    HRESULT InitDirect3D();
 
     HRESULT GetHardwareAdapter(_In_ IDXGIFactory4 *pDXGIFactory, _Out_ IDXGIAdapter **ppAdapter);
     ///
@@ -45,8 +40,9 @@ protected:
     void LogAdapterOutputs( IDXGIAdapter *pAdapter );
     void LogOutputDisplayModes( IDXGIOutput *pOutput, DXGI_FORMAT dxgiFormat );
 
+    HRESULT CreateDevice();
     HRESULT CreateCommandObjects();
-    HRESULT CreateSwapChain();
+    HRESULT CreateSwapChain(HWND hwnd);
     HRESULT CreateRtvAndDsvDescriptorHeaps();
     HRESULT CreateMsaaRenderBuffer();
 
@@ -61,13 +57,6 @@ protected:
     void Set4xMsaaEnabled(BOOL state );
 
     float GetAspectRatio() const;
-
-    virtual LRESULT OnResize();
-    virtual LRESULT OnMouseEvent( UINT uMsg, WPARAM wParam, int x, int y );
-    virtual LRESULT OnKeyEvent( WPARAM wParam, LPARAM lParam );
-    LRESULT MsgProc( HWND hwnd, UINT uMsg, WPARAM wp, LPARAM lp );
-
-    void CalcFrameStats();
 
     BOOL IsMsaaEnabled() const;
 
@@ -87,17 +76,7 @@ protected:
       BOOL VsyncEnabled;
     } m_aDeviceConfig;
 
-    // App handle
-    HINSTANCE m_hAppInst;
-    // Windows misc
-    HWND m_hMainWnd;
-    UINT m_iClientWidth;
-    UINT m_iClientHeight;
-    std::wstring m_MainWndCaption;
-
-    UINT m_uWndSizeState;       /* Window sizing state */
-    bool m_bAppPaused;          /* Is window paused */
-    bool m_bFullScreen;         /* Is window full screen displaying */
+    uint32_t m_uFrameWidth, m_uFrameHeight;
 
     // Back buffer format.
     DXGI_FORMAT m_BackBufferFormat;
@@ -138,8 +117,4 @@ protected:
     D3D12_RECT              m_ScissorRect;
 
     D3D12_CLEAR_VALUE       m_aRTVDefaultClearValue;
-
-    GameTimer               m_GameTimer;
 };
-
-#endif /* D3D12_APP_H */

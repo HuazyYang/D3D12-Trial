@@ -22,12 +22,12 @@
 using namespace DirectX;
 using namespace Microsoft::WRL;
 
-extern D3D12App *CreateShapesApp(HINSTANCE hInstance);
+extern D3D12RendererContext *CreateShapesApp(HINSTANCE hInstance);
 
 int main() {
 
     HRESULT hr;
-    D3D12App *pTheApp;
+    D3D12RendererContext *pTheApp;
 
 
     // Enable run-time memory check for debug builds.
@@ -215,7 +215,7 @@ namespace ShapesAppInternal {
 
 using namespace ShapesAppInternal;
 
-class ShapesApp : public D3D12App {
+class ShapesApp : public D3D12RendererContext {
 public:
     ShapesApp(HINSTANCE hIntance);
     ~ShapesApp();
@@ -309,12 +309,12 @@ private:
     POINT m_ptLastMousePos;
 };
 
-D3D12App *CreateShapesApp(HINSTANCE hInstance) {
+D3D12RendererContext *CreateShapesApp(HINSTANCE hInstance) {
     return new ShapesApp(hInstance);
 }
 
 ShapesApp::ShapesApp(HINSTANCE hInstance)
-    : D3D12App(hInstance) {
+    : D3D12RendererContext(hInstance) {
 
     m_Camera.SetPosition(0.0f, 2.0f, -15.0f);
     m_Camera.UpdateViewMatrix();
