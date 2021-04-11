@@ -17,11 +17,11 @@ public:
   HRESULT ResizeFrame(int cx, int cy);
 
 protected:
-///
-/// Check device feature support for a given device.
-/// This entry is used for selecting adapter.
-///
-virtual HRESULT CheckDeviceFeatureSupport(ID3D12Device5 *pDevice);
+  ///
+  /// Check device feature support for a given device.
+  /// This entry is used for selecting adapter.
+  ///
+  virtual HRESULT CheckDeviceFeatureSupport(ID3D12Device5 *pDevice);
   virtual HRESULT OnInitPipelines() { return S_OK; }
   virtual void OnFrameMoved(float fTime, float fElapsedTime) {}
   virtual void OnRenderFrame(float fTime, float fElapsedTime) {}
@@ -36,7 +36,6 @@ virtual HRESULT CheckDeviceFeatureSupport(ID3D12Device5 *pDevice);
   D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView() const;
 
   HRESULT GetHardwareAdapter(_In_ IDXGIFactory1 *pDXGIFactory, _Out_ IDXGIAdapter1 **ppAdapter);
-
 
   HRESULT CreateDevice();
   HRESULT CreateCommandObjects();
