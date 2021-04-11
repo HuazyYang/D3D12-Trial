@@ -1,4 +1,6 @@
-#include "D3D12App.h"
+#include "D3D12RendererContext.hpp"
+#include "UIController.hpp"
+#include "Win32Application.hpp"
 #include "Camera.h"
 #include <DirectXColors.h>
 #include <DirectXMath.h>
@@ -21,31 +23,20 @@
 using namespace DirectX;
 using namespace Microsoft::WRL;
 
-D3D12RendererContext *CreateLandAndWavesApp(HINSTANCE hInstance);
+void CreateLandAndWavesApp(D3D12RendererContext **ppRenderer, IUIController **ppUIController);
 
 
 int main() {
 
-    HRESULT hr;
-    D3D12RendererContext *pTheApp;
+    int ret;
+    D3D12RendererContext *pRenderer;
+    IUIController *pUIController;
 
+    CreateLandAndWavesApp(&pRenderer, &pUIController);
 
-    // Enable run-time memory check for debug builds.
-#if defined(DEBUG) | defined(_DEBUG)
-    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
-#endif
-
-    pTheApp = CreateLandAndWavesApp(NULL);
-    V(pTheApp->Initialize());
-    if (FAILED(hr)) {
-        SAFE_DELETE(pTheApp);
-        return hr;
-    }
-
-    hr = pTheApp->Run();
-    SAFE_DELETE(pTheApp);
-
-    return hr;
+    ret = RunSample(pRenderer, pUIController, 800, 600, L"Land and Waves");
+    SAFE_DELETE(pRenderer);
+    return ret;
 }
 
 std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> GetStaticSamplers();
@@ -191,14 +182,20 @@ std::array<const CD3DX12_STATIC_SAMPLER_DESC, 7> GetStaticSamplers() {
         anisotropicWrap, anisotropicClamp, depthPointBias };
 }
 
-class LandAndWavesApp : public D3D12RendererContext {
+class LandAndWavesApp : public D3D12RendererContext, public IUIController {
 public:
-    LandAndWavesApp(HINSTANCE hIntance);
+    LandAndWavesApp();
     ~LandAndWavesApp();
-
-    HRESULT Initialize() override;
-
 private:
+    HRESULT OnInitPipelines() override;
+    void OnFrameMoved(float fTime, float fElapsedTime) override;
+    void OnRenderFrame(float fTime, float fElapsedTime) override;
+    void OnKeyEvent(int downUp, unsigned short key, int repeatCnt) override;
+    void OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
+    void OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
+    void OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) override;
+    void OnResizeFrame(int cx, int cy) override;
+
     HRESULT LoadTextures();
     HRESULT BuildLandGeometry();
     HRESULT BuildWavesGeometry();
@@ -213,12 +210,6 @@ private:
     void UpdatePassCBs(FrameResources *pFrameResource, float fTime, float fElapsedTime);
     void UpdateObjectCBs(FrameResources *pFrameResource, float fTime, float fElapsedTime);
     void UpdateMaterialCBs();
-
-    virtual void Update(float fTime, float fElapsedTime);
-    virtual void RenderFrame(float fTime, float fElapsedTime);
-    virtual LRESULT OnKeyEvent(WPARAM wParam, LPARAM lParam);
-    virtual LRESULT OnMouseEvent(UINT uMsg, WPARAM wParam, int x, int y);
-    virtual LRESULT OnResize();
 
     void DrawRenderItem(
         FrameResources *pFrameResources,
@@ -259,12 +250,13 @@ private:
     POINT m_ptLastMousePos;
 };
 
-D3D12RendererContext *CreateLandAndWavesApp(HINSTANCE hInstance) {
-    return new LandAndWavesApp(hInstance);
+void CreateLandAndWavesApp(D3D12RendererContext **ppRenderer, IUIController **ppUIController) {
+  LandAndWavesApp *pContext = new LandAndWavesApp;
+  *ppRenderer = pContext;
+  *ppUIController = pContext;
 }
 
-LandAndWavesApp::LandAndWavesApp(HINSTANCE hInstance)
-    : D3D12RendererContext(hInstance) {
+LandAndWavesApp::LandAndWavesApp() {
     m_Camera.SetOrbit(50.0f, 1.5f * XM_PI, XM_PIDIV2 - 0.1f);
 
     m_aLights.AmbientStrength = { 0.25f, 0.25f, 0.35f, 1.0f };
@@ -334,10 +326,8 @@ LandAndWavesApp::~LandAndWavesApp() {
     delete m_pWaves;
 }
 
-HRESULT LandAndWavesApp::Initialize() {
+HRESULT LandAndWavesApp::OnInitPipelines() {
     HRESULT hr;
-
-    V_RETURN(__super::Initialize());
 
     // Reset the command list to prep for initialization commands.
     V_RETURN(m_pd3dCommandList->Reset(m_pd3dDirectCmdAlloc, nullptr));
@@ -1050,7 +1040,7 @@ HRESULT LandAndWavesApp::BuildFrameResourcess() {
     return hr;
 }
 
-void LandAndWavesApp::Update(float fTime, float fElapsedTime) {
+void LandAndWavesApp::OnFrameMoved(float fTime, float fElapsedTime) {
     FrameResources *pFrameResources;
 
     m_iCurrentFrameIndex = (m_iCurrentFrameIndex + 1) % s_iNumberOfFrames;
@@ -1162,7 +1152,7 @@ void LandAndWavesApp::UpdateMaterialCBs() {
     }
 }
 
-void LandAndWavesApp::RenderFrame(float fTime, float fElapsedTime) {
+void LandAndWavesApp::OnRenderFrame(float fTime, float fElapsedTime) {
 
     HRESULT hr;
     static FLOAT t_base;
@@ -1290,65 +1280,55 @@ void LandAndWavesApp::DrawRenderItem(
     }
 }
 
-LRESULT LandAndWavesApp::OnKeyEvent(WPARAM wParam, LPARAM lParam) {
+void LandAndWavesApp::OnKeyEvent(int downUp, unsigned short key, int repeatCnt) {
 
-    float dt = m_GameTimer.DeltaTime();
+    float dt = 0.0001f;
 
-    if (wParam == VK_LEFT)
+    if (key == VK_LEFT)
         m_fSunTheta -= 1.0f * dt;
-    if (wParam == VK_RIGHT)
+    if (key == VK_RIGHT)
         m_fSunTheta += 1.0f * dt;
-    if (wParam == VK_UP)
+    if (key == VK_UP)
         m_fSunPhi -= 1.0f * dt;
-    if (wParam == VK_DOWN)
+    if (key == VK_DOWN)
         m_fSunPhi += 1.0f *dt;
 
     m_fSunPhi = std::max(0.1f, m_fSunPhi);
     m_fSunPhi = std::min(m_fSunPhi, XM_PIDIV2);
-
-    return S_OK;
 }
 
-LRESULT LandAndWavesApp::OnMouseEvent(UINT uMsg, WPARAM wParam, int x, int y) {
-    switch (uMsg) {
-    case WM_LBUTTONDOWN:
-    case WM_RBUTTONDOWN:
+void LandAndWavesApp::OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY key, int x, int y) {
+    switch (ev) {
+    case UI_WM_LBUTTONDOWN:
+    case UI_WM_RBUTTONDOWN:
         m_ptLastMousePos.x = x;
         m_ptLastMousePos.y = y;
-        SetCapture(this->m_hMainWnd);
+        BeginCaptureWindowInput();
         break;
-    case WM_LBUTTONUP:
-    case WM_RBUTTONUP:
-        ReleaseCapture();
-    case WM_MOUSEMOVE:
-        if (wParam & MK_LBUTTON) {
-            // Make each pixel correspond to a quarter of a degree.
-            float dx = XMConvertToRadians(0.25f*static_cast<float>(x - m_ptLastMousePos.x));
-            float dy = XMConvertToRadians(0.25f*static_cast<float>(y - m_ptLastMousePos.y));
-            m_Camera.Rotate(dx, dy);
-        } else if (wParam & MK_RBUTTON) {
-            // Make each pixel correspond to 0.005 unit in the scene.
-            float dx = 0.2f*static_cast<float>(x - m_ptLastMousePos.x);
-            float dy = 0.2f*static_cast<float>(y - m_ptLastMousePos.y);
-
-            m_Camera.Scale(dx - dy, 5.0f, 150.0f);
-        }
-
-        m_ptLastMousePos.x = x;
-        m_ptLastMousePos.y = y;
+    case UI_WM_LBUTTONUP:
+    case UI_WM_RBUTTONUP:
+        EndCaptureWindowInput();
         break;
     }
-
-    return S_OK;
 }
 
-LRESULT LandAndWavesApp::OnResize() {
-    LRESULT lr;
+void LandAndWavesApp::OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
+  if (keys & UI_MK_LBUTTON) {
+      // Make each pixel correspond to a quarter of a degree.
+      float dx = XMConvertToRadians(0.25f*static_cast<float>(x - m_ptLastMousePos.x));
+      float dy = XMConvertToRadians(0.25f*static_cast<float>(y - m_ptLastMousePos.y));
+      m_Camera.Rotate(dx, dy);
+  }
+  m_ptLastMousePos.x = x;
+  m_ptLastMousePos.y = y;
+}
 
-    lr = __super::OnResize();
+void LandAndWavesApp::OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) {
+  m_Camera.Scale(0.02f*delta, 5.0f, 150.0f);
+}
+
+void LandAndWavesApp::OnResizeFrame(int cx, int cy) {
     m_Camera.SetProjMatrix(0.25f * XM_PI, GetAspectRatio(), 1.0f, 1000.0f);
-
-    return lr;
 }
 
 float LandAndWavesApp::GetHillsHeight(float x, float z) const {

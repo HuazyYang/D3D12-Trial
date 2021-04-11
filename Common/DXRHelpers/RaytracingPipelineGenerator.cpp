@@ -49,6 +49,8 @@ compiling in debug mode.
 // raytracing device prior to Windows 10 RS5.
 RayTracingPipelineGenerator::RayTracingPipelineGenerator()
 {
+  m_dummyGlobalRootSignature = nullptr;
+  m_dummyLocalRootSignature = nullptr;
 }
 
 RayTracingPipelineGenerator::~RayTracingPipelineGenerator() {

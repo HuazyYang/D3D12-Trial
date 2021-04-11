@@ -1,4 +1,5 @@
 #include "D3D12RendererContext.hpp"
+#include <dxgi1_6.h>
 
 //
 // D3D12RendererContext implementation.
@@ -13,6 +14,7 @@ D3D12RendererContext::D3D12RendererContext()
       m_pRTVDescriptorHeap(nullptr), m_pDSVDescriptorHeap(nullptr),
       m_pd3dDepthStencilBuffer(nullptr),
       m_iCurrentBackBuffer(0), m_ScreenViewport{0, 0, 0, 0, 0, 0}, m_ScissorRect{0, 0, 0, 0} {
+  m_aDeviceConfig.RequestHighPerformanceGpu = TRUE;
   /// Device configuration.
   m_aDeviceConfig.FeatureLevel = D3D_FEATURE_LEVEL_12_0;
 
@@ -96,11 +98,7 @@ HRESULT D3D12RendererContext::CreateDevice() {
   V_RETURN(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_pDXGIFactory)));
   DX_SetDebugName(m_pDXGIFactory, "DXGIFactory");
 
-#ifdef _DEBUG
-  LogAdapters();
-#endif
-
-  IDXGIAdapter *pAdapter;
+  IDXGIAdapter1 *pAdapter;
   V_RETURN(GetHardwareAdapter(m_pDXGIFactory, &pAdapter));
 
   V(D3D12CreateDevice(pAdapter, m_aDeviceConfig.FeatureLevel, IID_PPV_ARGS(&m_pd3dDevice)));
@@ -124,44 +122,61 @@ HRESULT D3D12RendererContext::CreateDevice() {
   return hr;
 }
 
-HRESULT D3D12RendererContext::GetHardwareAdapter(IDXGIFactory4 *pDXGIFactory,
-                                                 IDXGIAdapter **ppAdapter) {
-
-  HRESULT hr;
-  UINT i;
-  IDXGIAdapter1 *pAdapter;
-  DXGI_ADAPTER_DESC1 adapterDesc;
-  ID3D12Device5 *pDevice;
+HRESULT D3D12RendererContext::GetHardwareAdapter(IDXGIFactory1 *pFactory, IDXGIAdapter1 **ppAdapter) {
 
   *ppAdapter = nullptr;
 
-  for (i = 0; DXGI_ERROR_NOT_FOUND != pDXGIFactory->EnumAdapters1(i, &pAdapter); ++i) {
-    pAdapter->GetDesc1(&adapterDesc);
+  Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+  Microsoft::WRL::ComPtr<IDXGIFactory6> factory6;
+  Microsoft::WRL::ComPtr<ID3D12Device5> device;
 
-    if (adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
-      /// This is a warp device.
-      SAFE_RELEASE(pAdapter);
-      continue;
+  if (SUCCEEDED(pFactory->QueryInterface(IID_PPV_ARGS(&factory6)))) {
+    for (UINT adapterIndex = 0;
+         DXGI_ERROR_NOT_FOUND != factory6->EnumAdapterByGpuPreference(adapterIndex,
+                                                                      m_aDeviceConfig.RequestHighPerformanceGpu
+                                                                          ? DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE
+                                                                          : DXGI_GPU_PREFERENCE_UNSPECIFIED,
+                                                                      IID_PPV_ARGS(&adapter));
+         ++adapterIndex) {
+      DXGI_ADAPTER_DESC1 desc;
+      adapter->GetDesc1(&desc);
+
+      if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+        // Don't select the Basic Render Driver adapter.
+        // If you want a software adapter, pass in "/warp" on the command line.
+        continue;
+      }
+
+      // Check to see whether the adapter supports Direct3D 12, but don't create the
+      // actual device yet.
+      if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), m_aDeviceConfig.FeatureLevel, IID_PPV_ARGS(&device))) &&
+          SUCCEEDED(CheckDeviceFeatureSupport(device.Get()))) {
+        break;
+      }
     }
+  } else {
+    for (UINT adapterIndex = 0; DXGI_ERROR_NOT_FOUND != pFactory->EnumAdapters1(adapterIndex, &adapter);
+         ++adapterIndex) {
+      DXGI_ADAPTER_DESC1 desc;
+      adapter->GetDesc1(&desc);
 
-    if (FAILED(D3D12CreateDevice(pAdapter, m_aDeviceConfig.FeatureLevel, IID_PPV_ARGS(&pDevice)))) {
-      SAFE_RELEASE(pAdapter);
-      continue;
-    }
+      if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) {
+        // Don't select the Basic Render Driver adapter.
+        // If you want a software adapter, pass in "/warp" on the command line.
+        continue;
+      }
 
-    /// Check feature level support for the given device.
-    hr = CheckDeviceFeatureSupport(pDevice);
-
-    SAFE_RELEASE(pDevice);
-    if (SUCCEEDED(hr)) {
-      *ppAdapter = pAdapter;
-      break;
-    } else {
-      SAFE_RELEASE(pAdapter);
+      // Check to see whether the adapter supports Direct3D 12, but don't create the
+      // actual device yet.
+      if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), m_aDeviceConfig.FeatureLevel, IID_PPV_ARGS(&device))) &&
+          CheckDeviceFeatureSupport(device.Get())) {
+        break;
+      }
     }
   }
 
-  return *ppAdapter ? S_OK : E_NOT_SET;
+  *ppAdapter = adapter.Detach();
+  return *ppAdapter ? S_OK : E_FAIL;
 }
 
 HRESULT D3D12RendererContext::CheckDeviceFeatureSupport(ID3D12Device5 *pDevice) {
@@ -432,88 +447,6 @@ D3D12_CPU_DESCRIPTOR_HANDLE D3D12RendererContext::CurrentBackBufferView() const 
 
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12RendererContext::DepthStencilView() const {
   return m_pDSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-}
-
-void D3D12RendererContext::LogAdapters() {
-
-  UINT i;
-  std::wstring str;
-  IDXGIAdapter *pAdapter;
-  DXGI_ADAPTER_DESC adapterDesc;
-  std::vector<IDXGIAdapter *> adapterList;
-
-  i = 0;
-  while (m_pDXGIFactory->EnumAdapters(i, &pAdapter) != DXGI_ERROR_NOT_FOUND) {
-
-    pAdapter->GetDesc(&adapterDesc);
-
-    str = L"***Adapter: ";
-    str += adapterDesc.Description;
-    str += L'\n';
-
-    OutputDebugStringW(str.c_str());
-
-    adapterList.push_back(pAdapter);
-    ++i;
-  }
-
-  for (auto iter = adapterList.begin(); iter != adapterList.end(); ++iter) {
-    LogAdapterOutputs(*iter);
-    SAFE_RELEASE(*iter);
-  }
-}
-
-void D3D12RendererContext::LogAdapterOutputs(IDXGIAdapter *pAdapter) {
-
-  IDXGIOutput *pOutput;
-  DXGI_OUTPUT_DESC outputDesc;
-  int i;
-  std::wstring str;
-
-  i = 0;
-  while (pAdapter->EnumOutputs(i, &pOutput) != DXGI_ERROR_NOT_FOUND) {
-
-    pOutput->GetDesc(&outputDesc);
-
-    str = L"***Output: ";
-    str += outputDesc.DeviceName;
-    str += L'\n';
-
-    OutputDebugStringW(str.c_str());
-
-    LogOutputDisplayModes(pOutput, m_BackBufferFormat);
-    SAFE_RELEASE(pOutput);
-    ++i;
-  }
-}
-
-void D3D12RendererContext::LogOutputDisplayModes(IDXGIOutput *pOutput, DXGI_FORMAT dxgiFormat) {
-
-  UINT count = 0;
-  UINT flags = 0;
-  std::unique_ptr<DXGI_MODE_DESC[]> modeList;
-  UINT i;
-  std::wstringstream wstrm;
-
-  // Call with nullptr to get list count.
-  pOutput->GetDisplayModeList(dxgiFormat, flags, &count, nullptr);
-  modeList.reset(new DXGI_MODE_DESC[count]);
-  pOutput->GetDisplayModeList(dxgiFormat, flags, &count, modeList.get());
-
-  for (i = 0; i < count; ++i) {
-
-    UINT n = modeList[i].RefreshRate.Numerator;
-    UINT d = modeList[i].RefreshRate.Denominator;
-
-    wstrm << std::setfill(L' ') << std::right << std::setw(8) << L"Width=" << std::left
-          << std::setw(12) << modeList[i].Width << std::right << std::setw(9) << L"Height="
-          << std::left << std::setw(12) << modeList[i].Height << std::right << std::setw(14)
-          << L"RefreshRate=" << std::left << std::setw(0) << n << L"/" << d << '('
-          << (int)((float)n / d) << ')' << std::endl;
-
-    OutputDebugStringW(wstrm.str().c_str());
-    wstrm.str(L"");
-  }
 }
 
 BOOL D3D12RendererContext::IsMsaaEnabled() const { return m_aDeviceConfig.MsaaEnabled; }

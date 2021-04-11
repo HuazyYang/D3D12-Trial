@@ -1,15 +1,15 @@
-#include <Windows.h>
 #include "Common.h"
 #include "D3D12RendererContext.hpp"
+#include "GameTimer.hpp"
 #include "UIController.hpp"
+#include <Windows.h>
 #include <memory>
 #include <string.h>
-#include "GameTimer.hpp"
 
 struct FrameStatistics {
   uint32_t LastFrameCount;
   uint32_t TotalFrameCount;
-  double   LastTimeStamp;
+  double LastTimeStamp;
   std::wstring Title;
 };
 
@@ -25,8 +25,8 @@ struct _WindowContext {
 static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wp, LPARAM lp);
 static void ReportFrameStats(HWND hwnd, float fTime, float fElapsed);
 
-int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState,
-              _In_ int iWindowWidth, _In_ int iWindowHeight, _In_ const wchar_t *pWindowTitle) {
+int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState, _In_ int iWindowWidth,
+              _In_ int iWindowHeight, _In_ const wchar_t *pWindowTitle) {
 
   HRESULT hr;
   WNDCLASSEX wcx = {sizeof(wcx)};
@@ -73,9 +73,9 @@ int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState
   pWndContext->FrameStat.TotalFrameCount = 0;
   pWndContext->FrameStat.LastTimeStamp = 0.0;
 
-  hMainWnd = CreateWindowW(wcx.lpszClassName, pWindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT,
-                           CW_USEDEFAULT, rect.right - rect.left, rect.bottom - rect.top, NULL,
-                           NULL, wcx.hInstance, (LPVOID)pWndContext.get());
+  hMainWnd = CreateWindowW(wcx.lpszClassName, pWindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+                           rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wcx.hInstance,
+                           (LPVOID)pWndContext.get());
   if (!hMainWnd) {
     V_RETURN(E_FAIL);
   }
@@ -119,8 +119,7 @@ int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState
 void ReportFrameStats(HWND hwnd, float fTime, float fElapsed) {
   double timeInterval = 0.0;
 
-  _WindowContext *pWndContext =
-      reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+  _WindowContext *pWndContext = reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
   pWndContext->FrameStat.LastFrameCount += 1;
   pWndContext->FrameStat.TotalFrameCount += 1;
@@ -137,15 +136,13 @@ void ReportFrameStats(HWND hwnd, float fTime, float fElapsed) {
 }
 
 // Forward declare message handler from imgui_impl_win32.cpp
-extern LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam,
-                                                       LPARAM lParam);
+extern LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
 
-  _WindowContext *pWndContext =
-      reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+  _WindowContext *pWndContext = reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
   switch (msg) {
   case WM_CREATE: {
     LPCREATESTRUCT pCreateStruct = (LPCREATESTRUCT)lp;
@@ -172,7 +169,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (wp == SIZE_MINIMIZED) {
       pWndContext->Paused = TRUE;
       pWndContext->Timer.Stop();
-    } else if(!(pWndContext->Paused & 0x10)) {
+    } else if (!(pWndContext->Paused & 0x10)) {
       pWndContext->pRenderer->ResizeFrame(cx, cy);
       pWndContext->pUIController->OnResize(cx, cy);
     }
@@ -214,13 +211,14 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   case WM_LBUTTONUP:
   case WM_MBUTTONUP:
   case WM_RBUTTONUP:
-    pWndContext->pUIController->OnMouseButtonEvent((UI_MOUSE_BUTTON_EVENT)msg, (UI_MOUSE_VIRTUAL_KEY)wp, LOWORD(lp), HIWORD(lp));
+    pWndContext->pUIController->OnMouseButtonEvent((UI_MOUSE_BUTTON_EVENT)msg, (UI_MOUSE_VIRTUAL_KEY)wp, LOWORD(lp),
+                                                   HIWORD(lp));
   case WM_MOUSEMOVE:
     pWndContext->pUIController->OnMouseMove((UI_MOUSE_VIRTUAL_KEY)wp, LOWORD(lp), HIWORD(lp));
     break;
   case WM_MOUSEWHEEL:
-    pWndContext->pUIController->OnMouseWheel((UI_MOUSE_VIRTUAL_KEY)GET_KEYSTATE_WPARAM(wp), GET_WHEEL_DELTA_WPARAM(wp), LOWORD(lp),
-                                        HIWORD(lp));
+    pWndContext->pUIController->OnMouseWheel((UI_MOUSE_VIRTUAL_KEY)GET_KEYSTATE_WPARAM(wp), GET_WHEEL_DELTA_WPARAM(wp),
+                                             LOWORD(lp), HIWORD(lp));
     break;
   case WM_IME_KEYDOWN:
   case WM_KEYDOWN:
@@ -249,6 +247,4 @@ void BeginCaptureWindowInput() {
   SetCapture(hwnd);
 }
 
-void EndCaptureWindowInput() {
-  ReleaseCapture();
-}
+void EndCaptureWindowInput() { ReleaseCapture(); }

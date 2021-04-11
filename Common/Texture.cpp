@@ -1,6 +1,5 @@
 #include "Texture.h"
-#include "DDSTextureLoader12.h"
-//#include "DDSTextureLoader.h"
+#include <DDSTextureLoader12.h>
 
 
 Texture::Texture(const char *pszName) {

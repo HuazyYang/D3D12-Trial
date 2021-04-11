@@ -5,7 +5,6 @@ set(src_files
   D3D12RendererContext.cpp
   D3D12RendererContext.hpp
   d3dUtils.cpp
-  DDSTextureLoader12.cpp
   DescriptorHeapAllocator.cpp
   Common.cpp
   Common.h
@@ -19,9 +18,7 @@ set(src_files
   Camera.h
   d3dUtils.h
   d3dx12.h
-  DDSTextureLoader12.h
   DescriptorHeapAllocator.h
-  DirectXTex.h
   GameTimer.hpp
   GeometryGenerator.h
   MeshBuffer.h
@@ -32,7 +29,18 @@ set(src_files
   UploadBuffer.h
   Win32Application.cpp
   Win32Application.hpp
-  UserInteraction.hpp
+  UIController.hpp
+  ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader/DDSTextureLoader12.cpp
+  ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader/DDSTextureLoader12.h
+)
+
+set(dxr_src_files
+DXRHelpers/AccelerationStructureGenerator.cpp
+DXRHelpers/AccelerationStructureGenerator.h
+DXRHelpers/RaytracingPipelineGenerator.cpp
+DXRHelpers/RaytracingPipelineGenerator.h
+DXRHelpers/ShaderBindingTableGenerator.cpp
+DXRHelpers/ShaderBindingTableGenerator.h
 )
 
 include_directories(${THIRD_PARTY_DIR}/imgui)
@@ -56,8 +64,11 @@ set(imgui_src_files
 add_library(
   ${PROJECT_NAME}
   ${src_files}
+  ${dxr_src_files}
   ${imgui_src_files}
 )
+source_group(imgui ${imgui_src_files})
+source_group(DXRHelpers ${dxr_src_files})
 
 target_link_libraries(
   ${PROJECT_NAME}

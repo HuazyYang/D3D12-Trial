@@ -25,13 +25,16 @@ endif()
 
 set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 set(COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Common)
+set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex)
+set(ASSIMP_INCLUDE_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/include)
+set(ASSIMP_CONFIG_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/build/include/)
+set(ASSIMP_)
 
 include_directories(
   $ENV{VK_SDK_PATH}/include
   ${THIRD_PARTY_DIR}
-  ${THIRD_PARTY_DIR}/DirectXTex/DirectXTex
+  ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader
   ${COMMON_SOURCE_DIR}
-  ${THIRD_PARTY_DIR}/glfw/include
   ${THIRD_PARTY_DIR}/dxc/inc # dxc headers
 )
 
@@ -43,7 +46,6 @@ if(CMAKE_BUILD_TYPE)
   set(TRIAL_OUTDIR_END_SUFFIX ${CMAKE_BUILD_TYPE})
   set(TRIAL_OUTDIR_SUFFIX ${TRIAL_OUTDIR_END_SUFFIX})
 
-  link_directories(${CMAKE_CURRENT_BINARY_DIR}/glfw/src/${TRIAL_OUTDIR_END_SUFFIX})
   link_directories(${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX})
   link_directories(${THIRD_PARTY_DIR}/dxc/lib/x64)
 
@@ -59,7 +61,9 @@ endif(MSVC)
 
 add_subdirectory(Common)
 add_subdirectory(D3DTutorial)
-# add_subdirectory(NBodyGravity)
+add_subdirectory(NBodyGravity)
+add_subdirectory(HDRToneMappingCS)
+add_subdirectory(HelloDXR)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
