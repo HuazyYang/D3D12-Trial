@@ -1,6 +1,10 @@
 project(Common VERSION 0.1.0)
 
-set(src_files 
+set(src_files
+  D3D12Memory.cpp
+  D3D12Memory.hpp
+  ResourceUploadBatch.cpp
+  ResourceUploadBatch.hpp
   Camera.cpp
   D3D12RendererContext.cpp
   D3D12RendererContext.hpp
@@ -32,6 +36,11 @@ set(src_files
   UIController.hpp
   ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader/DDSTextureLoader12.cpp
   ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader/DDSTextureLoader12.h
+)
+
+set(D3D12MemoryAllocatorSrc
+  ${D3D12MEMORYALLOCATOR_SOURCE_DIR}/D3D12MemAlloc.h
+  ${D3D12MEMORYALLOCATOR_SOURCE_DIR}/D3D12MemAlloc.cpp
 )
 
 set(dxr_src_files
@@ -66,9 +75,11 @@ add_library(
   ${src_files}
   ${dxr_src_files}
   ${imgui_src_files}
+  ${D3D12MemoryAllocatorSrc}
 )
 source_group(imgui ${imgui_src_files})
 source_group(DXRHelpers ${dxr_src_files})
+source_group(D3D12MemAlloc ${D3D12MemoryAllocatorSrc})
 
 target_link_libraries(
   ${PROJECT_NAME}

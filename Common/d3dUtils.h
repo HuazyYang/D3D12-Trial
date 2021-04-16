@@ -10,15 +10,13 @@
 #include <comdef.h> /// For _com_ptr
 #include <wrl.h> /// For ComPtr
 
-// for _ASSERT in crt.
-#if defined(_DEBUG) || defined(DEBUG)
-#define _CRTDBG_MAP_ALLOC
-#include <crtdbg.h>
-#endif
+#include <cassert>
+#include <memory>
 
 #include "Common.h"
 
 #if defined(DEBUG) || defined(_DEBUG)
+#define RT_ASSERT(expr) assert(expr)
 #ifndef V
 #define V(x)           if(FAILED(hr = (x)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true); }
 #define V2(x, ...)     if(FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true); }
@@ -29,6 +27,7 @@
 #define V_RETURN2(x, ...) if(FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true);  return hr; }
 #endif /* V_RETURN2 */
 #else
+#define GT_ASSERT(expr) ((void)0)
 #ifndef V
 #define V(x)                (hr = (x));
 #define V2(x, ...)           (hr = (x, ##__VA_ARGS));
