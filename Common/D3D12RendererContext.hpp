@@ -4,6 +4,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "D3D12MemAllocator.hpp"
 
 class D3D12RendererContext {
 public:
@@ -38,6 +39,7 @@ protected:
   HRESULT GetHardwareAdapter(_In_ IDXGIFactory1 *pDXGIFactory, _Out_ IDXGIAdapter1 **ppAdapter);
 
   HRESULT CreateDevice();
+  HRESULT CreateMemAllocator();
   HRESULT CreateCommandObjects();
   HRESULT CreateSwapChain(HWND hwnd);
   HRESULT CreateRtvAndDsvDescriptorHeaps();
@@ -86,7 +88,9 @@ protected:
 
   // D3D12 resources.
   IDXGIFactory4 *m_pDXGIFactory;
+  IDXGIAdapter1 *m_pDXGIAdapter;
   ID3D12Device5 *m_pd3dDevice;
+  D3D12MemAllocator m_MemAllocator;
 
   UINT m_uRtvDescriptorSize;
   UINT m_uDsvDescriptorSize;

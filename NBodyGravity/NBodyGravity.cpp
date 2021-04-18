@@ -71,7 +71,7 @@ public:
   static UploadBuffer ParticleParamCB;
   static UploadBuffer DrawParticleCB;
 
-  INT64 FencePoint = 0;
+  UINT64 FencePoint = 0;
 };
 
 UploadBuffer FrameResources::ParticleParamCB;
@@ -108,9 +108,9 @@ private:
 
   enum { MAX_PARTICLES = 10000 };
 
-  ID3D12Resource *m_pParticleBufferUpload = nullptr;
-  ID3D12Resource *m_pParticleBuffer1 = nullptr;
-  ID3D12Resource *m_pParticleBuffer2 = nullptr;
+  D3D12MemAllocationSPtr m_pParticleBufferUpload;
+  D3D12MemAllocationSPtr m_pParticleBuffer1;
+  D3D12MemAllocationSPtr m_pParticleBuffer2;
 
   Texture *m_pParticleDiffuseMap = nullptr;
 
@@ -153,9 +153,6 @@ HRESULT CreateNBodyGravityRendererContextAndUI(D3D12RendererContext **ppRenderer
 NBodyGravityApp::NBodyGravityApp() {}
 
 NBodyGravityApp::~NBodyGravityApp() {
-  SAFE_RELEASE(m_pParticleBufferUpload);
-  SAFE_RELEASE(m_pParticleBuffer1);
-  SAFE_RELEASE(m_pParticleBuffer2);
   SAFE_RELEASE(m_pParticleDiffuseMap);
   SAFE_RELEASE(m_pParticleDrawBuffer);
   SAFE_RELEASE(m_pCbvUavSrvHeap);
@@ -215,9 +212,9 @@ HRESULT NBodyGravityApp::CreateParticleBuffers() {
 
   srand(GetTickCount());
 
-  ParticlePos *pParticles = new ParticlePos[MAX_PARTICLES];
+  std::unique_ptr<ParticlePos[]> pParticles { new ParticlePos[MAX_PARTICLES] };
   float fCenterSpread = m_fSpread * 0.5f;
-  LoadParticles(pParticles, XMVectorSet(fCenterSpread, .0f, .0f, .0f), XMVectorSet(.0f, .0f, -20.0f, .0f), m_fSpread,
+  LoadParticles(&pParticles[0], XMVectorSet(fCenterSpread, .0f, .0f, .0f), XMVectorSet(.0f, .0f, -20.0f, .0f), m_fSpread,
                 MAX_PARTICLES / 2);
   LoadParticles(&pParticles[MAX_PARTICLES / 2], XMVectorSet(-fCenterSpread, .0f, .0f, .0f),
                 XMVectorSet(.0f, .0f, 20.0f, .0f), m_fSpread, MAX_PARTICLES / 2);
@@ -225,54 +222,47 @@ HRESULT NBodyGravityApp::CreateParticleBuffers() {
   uBufferSize = sizeof(ParticlePos) * MAX_PARTICLES;
 
   if (!m_pParticleBuffer1) {
-    V(m_pd3dDevice->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(uBufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
-        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&m_pParticleBuffer1)));
-    if (FAILED(hr)) {
-      SAFE_DELETE_ARRAY(pParticles);
-      return hr;
-    }
+    D3D12MA_ALLOCATION_DESC allocDesc = {};
+    allocDesc.Flags = D3D12MA::ALLOCATION_FLAG_NONE;
+    allocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+    V_RETURN(m_MemAllocator->CreateResource(
+      &allocDesc,
+      &CD3DX12_RESOURCE_DESC::Buffer(uBufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+      D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+      D3D12MA_IID_PPV_ARGS(&m_pParticleBuffer1)
+    ));
+    V_RETURN(m_MemAllocator->CreateResource(
+      &allocDesc,
+      &CD3DX12_RESOURCE_DESC::Buffer(uBufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+      D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+      D3D12MA_IID_PPV_ARGS(&m_pParticleBuffer2)
+    ));
 
-    V(m_pd3dDevice->CreateCommittedResource(
-        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT), D3D12_HEAP_FLAG_NONE,
-        &CD3DX12_RESOURCE_DESC::Buffer(uBufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_pParticleBuffer2)));
-    if (FAILED(hr)) {
-      SAFE_DELETE_ARRAY(pParticles);
-      return hr;
-    }
-
-    //
-    // In order to copy CPU memory data into our default buffer, we need to create
-    // an intermediate upload heap.
-    //
-    V(m_pd3dDevice->CreateCommittedResource(&CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD), D3D12_HEAP_FLAG_NONE,
-                                            &CD3DX12_RESOURCE_DESC::Buffer(uBufferSize),
-                                            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                            IID_PPV_ARGS(&m_pParticleBufferUpload)));
-    if (FAILED(hr)) {
-      SAFE_DELETE_ARRAY(pParticles);
-      return hr;
-    }
+    allocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+    V_RETURN(m_MemAllocator->CreateResource(
+      &allocDesc,
+      &CD3DX12_RESOURCE_DESC::Buffer(uBufferSize),
+      D3D12_RESOURCE_STATE_GENERIC_READ,
+      nullptr,
+      D3D12MA_IID_PPV_ARGS(&m_pParticleBufferUpload)
+    ));
   } else {
 
     hr = S_OK;
 
-    m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1,
+    m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(),
                                                                                 D3D12_RESOURCE_STATE_GENERIC_READ,
                                                                                 D3D12_RESOURCE_STATE_COPY_DEST));
   }
 
   D3D12_SUBRESOURCE_DATA initData;
-  initData.pData = pParticles;
+  initData.pData = &pParticles[0];
   initData.RowPitch = uBufferSize;
   initData.SlicePitch = 1;
 
-  UpdateSubresources<1>(m_pd3dCommandList, m_pParticleBuffer1, m_pParticleBufferUpload, 0, 0, 1, &initData);
-  SAFE_DELETE_ARRAY(pParticles);
+  UpdateSubresources<1>(m_pd3dCommandList, m_pParticleBuffer1.Get(), m_pParticleBufferUpload.Get(), 0, 0, 1, &initData);
 
-  m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1,
+  m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(),
                                                                               D3D12_RESOURCE_STATE_COPY_DEST,
                                                                               D3D12_RESOURCE_STATE_GENERIC_READ));
 
@@ -486,16 +476,16 @@ HRESULT NBodyGravityApp::CreateCbvSrvUavHeap() {
   uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
 
   heapHandle2 = heapHandle;
-  m_pd3dDevice->CreateShaderResourceView(m_pParticleBuffer1, &srvDesc, heapHandle2);
+  m_pd3dDevice->CreateShaderResourceView(m_pParticleBuffer1.Get(), &srvDesc, heapHandle2);
 
   heapHandle2.Offset(1, m_uCbvSrvUavDescriptorSize);
-  m_pd3dDevice->CreateUnorderedAccessView(m_pParticleBuffer1, nullptr, &uavDesc, heapHandle2);
+  m_pd3dDevice->CreateUnorderedAccessView(m_pParticleBuffer1.Get(), nullptr, &uavDesc, heapHandle2);
 
   heapHandle2.Offset(1, m_uCbvSrvUavDescriptorSize);
-  m_pd3dDevice->CreateShaderResourceView(m_pParticleBuffer2, &srvDesc, heapHandle2);
+  m_pd3dDevice->CreateShaderResourceView(m_pParticleBuffer2.Get(), &srvDesc, heapHandle2);
 
   heapHandle2.Offset(1, m_uCbvSrvUavDescriptorSize);
-  m_pd3dDevice->CreateUnorderedAccessView(m_pParticleBuffer2, nullptr, &uavDesc, heapHandle2);
+  m_pd3dDevice->CreateUnorderedAccessView(m_pParticleBuffer2.Get(), nullptr, &uavDesc, heapHandle2);
 
   heapHandle2.Offset(1, m_uCbvSrvUavDescriptorSize);
   m_pd3dDevice->CreateShaderResourceView(m_pParticleDiffuseMap->Resource, nullptr, heapHandle2);
@@ -579,9 +569,9 @@ void NBodyGravityApp::UpdatePaticles(FrameResources *pFrameResources) {
   m_iParticleBuffersSwapState ^= 1;
 
   D3D12_RESOURCE_BARRIER Barriers[] = {
-      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
                                            D3D12_RESOURCE_STATE_GENERIC_READ),
-      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer2, D3D12_RESOURCE_STATE_GENERIC_READ,
+      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer2.Get(), D3D12_RESOURCE_STATE_GENERIC_READ,
                                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS)};
 
   m_pd3dCommandList->ResourceBarrier(2, Barriers);

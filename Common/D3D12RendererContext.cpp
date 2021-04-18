@@ -7,7 +7,7 @@
 D3D12RendererContext::D3D12RendererContext()
     : m_uFrameWidth(800), m_uFrameHeight(600), m_BackBufferFormat(DXGI_FORMAT_R8G8B8A8_UNORM),
       m_DepthStencilBufferFormat(DXGI_FORMAT_D24_UNORM_S8_UINT),
-      m_pd3dMsaaRenderTargetBuffer(nullptr), m_pDXGIFactory(nullptr), m_pd3dDevice(nullptr),
+      m_pd3dMsaaRenderTargetBuffer(nullptr), m_pDXGIFactory(nullptr), m_pDXGIAdapter(nullptr), m_pd3dDevice(nullptr),
       m_uRtvDescriptorSize(0), m_uDsvDescriptorSize(0), m_uCbvSrvUavDescriptorSize(0),
       m_pd3dCommandQueue(nullptr), m_pd3dDirectCmdAlloc(nullptr), m_pd3dCommandList(nullptr),
       m_pd3dFence(nullptr), m_FenceCount(0), m_hFenceEvent(nullptr), m_pSwapChain(nullptr),
@@ -34,6 +34,7 @@ D3D12RendererContext::D3D12RendererContext()
 
 D3D12RendererContext::~D3D12RendererContext() {
   SAFE_RELEASE(m_pDXGIFactory);
+  SAFE_RELEASE(m_pDXGIAdapter);
   SAFE_RELEASE(m_pd3dDevice);
 
   SAFE_RELEASE(m_pd3dCommandQueue);
@@ -64,6 +65,7 @@ HRESULT D3D12RendererContext::Initialize(HWND hwnd, int cx, int cy) {
   m_uFrameHeight = cy;
 
   V_RETURN(CreateDevice());
+  V_RETURN(CreateMemAllocator());
   V_RETURN(CreateCommandObjects());
   V_RETURN(CreateSwapChain(hwnd));
   V_RETURN(CreateRtvAndDsvDescriptorHeaps());
@@ -98,11 +100,9 @@ HRESULT D3D12RendererContext::CreateDevice() {
   V_RETURN(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_pDXGIFactory)));
   DX_SetDebugName(m_pDXGIFactory, "DXGIFactory");
 
-  IDXGIAdapter1 *pAdapter;
-  V_RETURN(GetHardwareAdapter(m_pDXGIFactory, &pAdapter));
+  V_RETURN(GetHardwareAdapter(m_pDXGIFactory, &m_pDXGIAdapter));
 
-  V(D3D12CreateDevice(pAdapter, m_aDeviceConfig.FeatureLevel, IID_PPV_ARGS(&m_pd3dDevice)));
-  SAFE_RELEASE(pAdapter);
+  V(D3D12CreateDevice(m_pDXGIAdapter, m_aDeviceConfig.FeatureLevel, IID_PPV_ARGS(&m_pd3dDevice)));
   if (FAILED(hr)) {
     V_RETURN2("Can not create device for a given feature level and feature", E_NOTIMPL);
   }
@@ -221,6 +221,15 @@ HRESULT D3D12RendererContext::CheckDeviceFeatureSupport(ID3D12Device5 *pDevice) 
 
   /// Final return.
   return hr;
+}
+
+HRESULT D3D12RendererContext::CreateMemAllocator() {
+
+  D3D12MA_ALLOCATOR_DESC desc = {};
+  desc.pDevice = m_pd3dDevice;
+  desc.pAdapter = m_pDXGIAdapter;
+
+  return m_MemAllocator.Initialize(&desc);
 }
 
 HRESULT D3D12RendererContext::CreateCommandObjects() {

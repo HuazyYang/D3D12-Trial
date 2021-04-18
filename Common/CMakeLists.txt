@@ -1,10 +1,8 @@
 project(Common VERSION 0.1.0)
 
 set(src_files
-  D3D12Memory.cpp
-  D3D12Memory.hpp
-  ResourceUploadBatch.cpp
-  ResourceUploadBatch.hpp
+  D3D12MemAllocator.cpp
+  D3D12MemAllocator.hpp
   Camera.cpp
   D3D12RendererContext.cpp
   D3D12RendererContext.hpp
