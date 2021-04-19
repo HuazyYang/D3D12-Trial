@@ -28,8 +28,12 @@ set(COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Common)
 set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex)
 set(D3D12MEMORYALLOCATOR_SOURCE_DIR ${THIRD_PARTY_DIR}/D3D12MemoryAllocator/src)
 set(ASSIMP_INCLUDE_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/include)
-set(ASSIMP_CONFIG_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/build/include/)
-set(ASSIMP_)
+set(ASSIMP_CONFIG_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/build/include)
+
+
+set(HLSL_SHADER_MODEL_VERSION 6_0)
+set(DXC_BINARY_DIR ${THIRD_PARTY_DIR}/dxc/bin/x64) # DXC binary path
+set(DXC_COMPILER ${DXC_BINARY_DIR}/dxc.exe) # dxc.exe
 
 include_directories(
   $ENV{VK_SDK_PATH}/include

@@ -1,6 +1,15 @@
 #include "D3D12RendererContext.hpp"
 #include <dxgi1_6.h>
 
+namespace Internal {
+  // One and only renderer context.
+  static D3D12RendererContext *g_pRendererContext;
+}
+
+D3D12MemAllocator& D3D12RendererContextGetMemAllocator() {
+  return Internal::g_pRendererContext->m_MemAllocator;
+}
+
 //
 // D3D12RendererContext implementation.
 //
@@ -14,6 +23,9 @@ D3D12RendererContext::D3D12RendererContext()
       m_pRTVDescriptorHeap(nullptr), m_pDSVDescriptorHeap(nullptr),
       m_pd3dDepthStencilBuffer(nullptr),
       m_iCurrentBackBuffer(0), m_ScreenViewport{0, 0, 0, 0, 0, 0}, m_ScissorRect{0, 0, 0, 0} {
+
+  Internal::g_pRendererContext = this;
+
   m_aDeviceConfig.RequestHighPerformanceGpu = TRUE;
   /// Device configuration.
   m_aDeviceConfig.FeatureLevel = D3D_FEATURE_LEVEL_12_0;

@@ -1,6 +1,11 @@
 project(Common VERSION 0.1.0)
 
+set(pch_files
+  pch.hpp
+)
+
 set(src_files
+  pch.cpp
   D3D12MemAllocator.cpp
   D3D12MemAllocator.hpp
   Camera.cpp
@@ -88,5 +93,19 @@ target_link_libraries(
   d3dcompiler
   dxcompiler
 )
+target_precompile_headers(${PROJECT_NAME}
+  PRIVATE
+  ${pch_files}
+)
+# add_dependencies(${PROJECT_NAME} ${PROJECT_NAME}GenPrecompiledHeaders)
 
-target_link_options(${PROJECT_NAME} PRIVATE "/DELAYLOAD:d3d12.dll")
+# target_link_options(${PROJECT_NAME} PRIVATE "/DELAYLOAD:d3d12.dll")
+
+
+# compile_shader_dxil("Shaders/GenerateMips.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/Compiled" cs CSMain GenerateMips_hlslh)
+
+# add_custom_target(
+#   ${PROJECT_NAME}GenPrecompiledHeaders ALL
+#   DEPENDS ${GenerateMips_hlslh}
+#   SOURCES "Shaders/GenerateMips.hlsl"
+# )

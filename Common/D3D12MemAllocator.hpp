@@ -50,10 +50,15 @@ public:
 
   D3D12MA::Allocator *operator->() const;
 
+  D3D12MA::Allocator *Get() const;
+
 private:
   D3D12MA::Allocator *m_pAllocator;
 };
 
+//
+// inline implementation
+//
 inline D3D12MA::Allocation **D3D12MemAllocationSPtr::GetAllocationAddressOf() {
   return &m_pMemPtr;
 }
@@ -64,5 +69,9 @@ inline ID3D12Resource **D3D12MemAllocationSPtr::ReleaseAndGetAddressOf() {
 }
 
 inline D3D12MA::Allocator *D3D12MemAllocator::operator->() const {
+  return m_pAllocator;
+}
+
+inline D3D12MA::Allocator *D3D12MemAllocator::Get() const {
   return m_pAllocator;
 }

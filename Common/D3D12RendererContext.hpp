@@ -7,6 +7,7 @@
 #include "D3D12MemAllocator.hpp"
 
 class D3D12RendererContext {
+
 public:
   D3D12RendererContext();
   virtual ~D3D12RendererContext();
@@ -18,6 +19,7 @@ public:
   HRESULT ResizeFrame(int cx, int cy);
 
 protected:
+  friend D3D12MemAllocator& D3D12RendererContextGetMemAllocator();
   ///
   /// Check device feature support for a given device.
   /// This entry is used for selecting adapter.

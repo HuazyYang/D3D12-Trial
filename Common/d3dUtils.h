@@ -1,5 +1,5 @@
-#ifndef D3D_UTILS_H
-#define D3D_UTILS_H
+#ifndef __D3D_UTILS_HPP__
+#define __D3D_UTILS_HPP__
 
 // d3d12 common header.
 #include <dxgi1_4.h>
@@ -15,6 +15,9 @@
 
 #include "Common.h"
 
+class D3D12MemAllocator;
+class D3D12MemAllocationSPtr;
+
 #if defined(DEBUG) || defined(_DEBUG)
 #define RT_ASSERT(expr) assert(expr)
 #ifndef V
@@ -27,7 +30,7 @@
 #define V_RETURN2(x, ...) if(FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true);  return hr; }
 #endif /* V_RETURN2 */
 #else
-#define GT_ASSERT(expr) ((void)0)
+#define RT_ASSERT(expr) ((void)0)
 #ifndef V
 #define V(x)                (hr = (x));
 #define V2(x, ...)           (hr = (x, ##__VA_ARGS));
@@ -74,6 +77,11 @@ inline void DX_SetDebugName(ID3D12DeviceChild *pObj, const CHAR *pstrName) {
 #define DX_SetDebugName( pObj, pstrName )
 #endif
 
+#define DX_TRACEA(fmt, ...) DXOutputDebugStringA(fmt, ##__VA_ARGS__)
+#define DX_TRACEW(fmt, ...) DXOutputDebugStringW(fmt, ##__VA_ARGS__)
+
+#define DX_TRACE DX_TRACEW
+
 struct Unknown12
 {
     Unknown12();
@@ -97,6 +105,15 @@ struct NonCopyable {
   NonCopyable operator = (const NonCopyable &) = delete;
   NonCopyable& operator = (NonCopyable &&) = delete;
 };
+
+template<typename Ty, typename ...TArgs>
+void reconstruct_inplace(void *p, TArgs ...args) {
+  reinterpret_cast<Ty *>(p)->~Ty();
+#pragma push_macro("new")
+#undef new
+  :new(p)Ty(args...);
+#pragma pop_macro("new")
+}
 
 extern HRESULT WINAPI DXTraceW(_In_z_ const WCHAR* strFile, _In_ DWORD dwLine, _In_ HRESULT hr,
     _In_opt_ const WCHAR* strMsg, _In_ bool bPopMsgBox);
@@ -158,6 +175,11 @@ namespace d3dUtils {
 
   extern UINT CalcConstantBufferByteSize(UINT uByteSize);
 
+
+  // Get Global Memory Allocator associated with global renderer context.
+  extern
+  D3D12MemAllocator& D3D12RendererContextGetMemAllocator();
+
   ///
 /// Shader binding table for binding resource between pipeline and resource views,
 /// for example root constants, CBV, SRV, UAV.
@@ -193,4 +215,4 @@ namespace d3dUtils {
 
 };
 
-#endif /* D3D_UTILS_H */
+#endif /* __D3D_UTILS_HPP__ */
