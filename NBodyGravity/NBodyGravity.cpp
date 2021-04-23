@@ -108,9 +108,9 @@ private:
 
   enum { MAX_PARTICLES = 10000 };
 
-  D3D12MemAllocationSPtr m_pParticleBufferUpload;
-  D3D12MemAllocationSPtr m_pParticleBuffer1;
-  D3D12MemAllocationSPtr m_pParticleBuffer2;
+  D3D12MAResourceSPtr m_pParticleBufferUpload;
+  D3D12MAResourceSPtr m_pParticleBuffer1;
+  D3D12MAResourceSPtr m_pParticleBuffer2;
 
   Texture *m_pParticleDiffuseMap = nullptr;
 
@@ -513,17 +513,9 @@ void NBodyGravityApp::OnFrameMoved(float fTime, float fElapsedTime) {
   pFrameResources = &m_FrameResources[m_iCurrentFrameIndex];
 
   /// Sychronize it.
-  if (pFrameResources->FencePoint != 0 && m_pd3dFence->GetCompletedValue() < pFrameResources->FencePoint) {
-
-    if (!m_hFenceEvent)
-      m_hFenceEvent = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
-
-    m_pd3dFence->SetEventOnCompletion(pFrameResources->FencePoint, m_hFenceEvent);
-    WaitForSingleObject(m_hFenceEvent, INFINITE);
-  }
+  m_pSyncFence->WaitForSyncPoint(pFrameResources->FencePoint);
 
   /// Update the buffers up to this time point.
-
   ParticelParams pp;
 
   pp.ParticleCount = MAX_PARTICLES;
@@ -627,11 +619,9 @@ void NBodyGravityApp::OnRenderFrame(float fTime, float fElapsedTime) {
   ID3D12CommandList *cmdList[] = {m_pd3dCommandList};
   m_pd3dCommandQueue->ExecuteCommandLists(1, cmdList);
 
+  m_pSyncFence->Signal(m_pd3dCommandQueue, &pFrameResources->FencePoint);
+
   Present();
-
-  pFrameResources->FencePoint = ++m_FenceCount;
-
-  m_pd3dCommandQueue->Signal(m_pd3dFence, m_FenceCount);
 }
 
 void NBodyGravityApp::OnResizeFrame(int cx, int cy) {

@@ -794,14 +794,7 @@ void HDRToneMappingCSApp::OnFrameMoved(float fTime, float fTimeElapsed) {
   pFrameResources = &m_aFrameResources[m_iCurrentFrameIndex];
 
   /// Sychronize it.
-  if (pFrameResources->FencePoint != 0 && m_pd3dFence->GetCompletedValue() < pFrameResources->FencePoint) {
-
-    if (!m_hFenceEvent)
-      m_hFenceEvent = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
-
-    m_pd3dFence->SetEventOnCompletion(pFrameResources->FencePoint, m_hFenceEvent);
-    WaitForSingleObject(m_hFenceEvent, INFINITE);
-  }
+  m_pSyncFence->WaitForSyncPoint(pFrameResources->FencePoint);
 
   SkyboxRenderParams skyboxRenderParams;
   XMMATRIX matWVP;
@@ -866,11 +859,9 @@ void HDRToneMappingCSApp::OnRenderFrame(float fTime, float fTimeElapsed) {
   ID3D12CommandList *cmdList[] = {m_pd3dCommandList};
   m_pd3dCommandQueue->ExecuteCommandLists(1, cmdList);
 
+  V(m_pSyncFence->Signal(m_pd3dCommandQueue, &pFrameResources->FencePoint));
+
   Present();
-
-  pFrameResources->FencePoint = ++m_FenceCount;
-
-  m_pd3dCommandQueue->Signal(m_pd3dFence, m_FenceCount);
 }
 
 void HDRToneMappingCSApp::RenderSkybox(FrameResources *pFrameResource) {

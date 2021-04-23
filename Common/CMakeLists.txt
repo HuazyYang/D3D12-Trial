@@ -6,6 +6,10 @@ set(pch_files
 
 set(src_files
   pch.cpp
+  SyncFence.cpp
+  SyncFence.hpp
+  ResourceUploadBatch.cpp
+  ResourceUploadBatch.hpp
   D3D12MemAllocator.cpp
   D3D12MemAllocator.hpp
   Camera.cpp

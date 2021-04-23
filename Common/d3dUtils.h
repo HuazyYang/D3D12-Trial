@@ -15,44 +15,44 @@
 
 #include "Common.h"
 
-class D3D12MemAllocator;
-class D3D12MemAllocationSPtr;
+class D3D12MAAllocator;
+class D3D12MAResourceSPtr;
 
-#if defined(DEBUG) || defined(_DEBUG)
+#if defined(_DEBUG) || defined(DEBUG)
 #define RT_ASSERT(expr) assert(expr)
 #ifndef V
-#define V(x)           if(FAILED(hr = (x)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true); }
-#define V2(x, ...)     if(FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true); }
-#endif
+#define V(x)           (FAILED(hr = (x)) && (DebugBreak(), 1) ? DXTraceW(__FILEW__, __LINE__, hr, L#x, true) : (HRESULT)0)
+#define V2(x, ...)     (FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1) ? DXTraceW(__FILEW__, __LINE__, hr, L#x###__VA_ARGS__, true) : (HRESULT)0)
+#endif /* V */
 
 #ifndef V_RETURN
-#define V_RETURN(x)    if(FAILED(hr = (x)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true);  return hr; }
-#define V_RETURN2(x, ...) if(FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true);  return hr; }
+#define V_RETURN(x)    do { if(FAILED(hr = (x)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x, true); return hr; } } while(0)
+#define V_RETURN2(x, ...) do { if(FAILED(hr = ((x), ##__VA_ARGS__)) && (DebugBreak(), 1)) { DXTraceW(__FILEW__, __LINE__, hr, L#x###__VA_ARGS__, true); return hr; } } while(0)
 #endif /* V_RETURN2 */
 #else
 #define RT_ASSERT(expr) ((void)0)
 #ifndef V
-#define V(x)                (hr = (x));
-#define V2(x, ...)           (hr = (x, ##__VA_ARGS));
+#define V(x)                (hr = (x))
+#define V2(x, ...)           (hr = (x, ##__VA_ARGS))
 #endif
 #ifndef V_RETURN
-#define V_RETURN(x)         if(FAILED(hr = (x))) {return hr; }
-#define V_RETURN2(x, ...)   if(FAILED(hr=(x, ##__VA_ARGS__))) { return hr; }
+#define V_RETURN(x)         do { if(FAILED(hr = (x))) {return hr; } } while(0)
+#define V_RETURN2(x, ...)   do { if(FAILED(hr=((x), ##__VA_ARGS__))) { return hr; } } while(0)
 #endif
 #endif
 
 #ifndef SAFE_DELETE
-#define SAFE_DELETE(p)       { if (p) { delete (p);     (p) = nullptr; } }
+#define SAFE_DELETE(p)        ((p) ? delete (p), p = nullptr : nullptr)
 #endif
 #ifndef SAFE_DELETE_ARRAY
-#define SAFE_DELETE_ARRAY(p) { if (p) { delete[] (p);   (p) = nullptr; } }
+#define SAFE_DELETE_ARRAY(p) ((p) ? delete [](p), p = nullptr: nullptr)
 #endif
 #ifndef SAFE_RELEASE
-#define SAFE_RELEASE(p)      { if (p) { (p)->Release(); (p) = nullptr; } }
+#define SAFE_RELEASE(p)      ((p) ? (p)->Release(), p = nullptr : nullptr)
 #endif
 
 #ifndef SAFE_ADDREF
-#define SAFE_ADDREF(p) { (p) ? (p)->AddRef() : (ULONG)0; }
+#define SAFE_ADDREF(p)       ((p) ? (p)->AddRef() : (ULONG)0)
 #endif
 
 // Use DXUT_SetDebugName() to attach names to D3D objects for use by 
@@ -81,6 +81,12 @@ inline void DX_SetDebugName(ID3D12DeviceChild *pObj, const CHAR *pstrName) {
 #define DX_TRACEW(fmt, ...) DXOutputDebugStringW(fmt, ##__VA_ARGS__)
 
 #define DX_TRACE DX_TRACEW
+
+extern HRESULT WINAPI DXTraceW(_In_z_ const WCHAR* strFile, _In_ DWORD dwLine, _In_ HRESULT hr,
+    _In_opt_ const WCHAR* strMsg, _In_ bool bPopMsgBox);
+
+extern void DXOutputDebugStringA(LPCSTR fmt, ...);
+extern void DXOutputDebugStringW(LPCWSTR fmt, ...);
 
 struct Unknown12
 {
@@ -114,12 +120,6 @@ void reconstruct_inplace(void *p, TArgs ...args) {
   :new(p)Ty(args...);
 #pragma pop_macro("new")
 }
-
-extern HRESULT WINAPI DXTraceW(_In_z_ const WCHAR* strFile, _In_ DWORD dwLine, _In_ HRESULT hr,
-    _In_opt_ const WCHAR* strMsg, _In_ bool bPopMsgBox);
-
-extern void DXOutputDebugStringA(LPCSTR fmt, ...);
-extern void DXOutputDebugStringW(LPCWSTR fmt, ...);
 
 namespace d3dUtils {
 
@@ -178,7 +178,7 @@ namespace d3dUtils {
 
   // Get Global Memory Allocator associated with global renderer context.
   extern
-  D3D12MemAllocator& D3D12RendererContextGetMemAllocator();
+  D3D12MAAllocator& D3D12RendererContextGetMemAllocator();
 
   ///
 /// Shader binding table for binding resource between pipeline and resource views,

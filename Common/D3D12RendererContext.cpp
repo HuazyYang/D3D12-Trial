@@ -6,7 +6,7 @@ namespace Internal {
   static D3D12RendererContext *g_pRendererContext;
 }
 
-D3D12MemAllocator& D3D12RendererContextGetMemAllocator() {
+D3D12MAAllocator& D3D12RendererContextGetMemAllocator() {
   return Internal::g_pRendererContext->m_MemAllocator;
 }
 
@@ -19,7 +19,7 @@ D3D12RendererContext::D3D12RendererContext()
       m_pd3dMsaaRenderTargetBuffer(nullptr), m_pDXGIFactory(nullptr), m_pDXGIAdapter(nullptr), m_pd3dDevice(nullptr),
       m_uRtvDescriptorSize(0), m_uDsvDescriptorSize(0), m_uCbvSrvUavDescriptorSize(0),
       m_pd3dCommandQueue(nullptr), m_pd3dDirectCmdAlloc(nullptr), m_pd3dCommandList(nullptr),
-      m_pd3dFence(nullptr), m_FenceCount(0), m_hFenceEvent(nullptr), m_pSwapChain(nullptr),
+      m_pSwapChain(nullptr),
       m_pRTVDescriptorHeap(nullptr), m_pDSVDescriptorHeap(nullptr),
       m_pd3dDepthStencilBuffer(nullptr),
       m_iCurrentBackBuffer(0), m_ScreenViewport{0, 0, 0, 0, 0, 0}, m_ScissorRect{0, 0, 0, 0} {
@@ -55,8 +55,7 @@ D3D12RendererContext::~D3D12RendererContext() {
 
   SAFE_RELEASE(m_pd3dMsaaRenderTargetBuffer);
 
-  SAFE_RELEASE(m_pd3dFence);
-  CloseHandle(m_hFenceEvent);
+  SAFE_RELEASE(m_pSyncFence);
 
   SAFE_RELEASE(m_pSwapChain);
 
@@ -120,9 +119,8 @@ HRESULT D3D12RendererContext::CreateDevice() {
   }
   DX_SetDebugName(m_pd3dDevice, "D3D12Device");
 
-  m_FenceCount = 0;
-  V_RETURN(m_pd3dDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pd3dFence)));
-  DX_SetDebugName(m_pd3dFence, "D3D12Fence");
+  V_RETURN(CreateSyncFence(&m_pSyncFence));
+  V_RETURN(m_pSyncFence->Initialize(m_pd3dDevice));
 
   m_uRtvDescriptorSize =
       m_pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -403,22 +401,11 @@ void D3D12RendererContext::FlushCommandQueue() {
 
   HRESULT hr;
   // Advance the fence value to mark commands up to this fence point.
-  m_FenceCount += 1;
 
-  V(m_pd3dCommandQueue->Signal(m_pd3dFence, m_FenceCount));
+  UINT64 syncPoint;
 
-  // Wait until the GPU has completed commands up to this fence point.
-  if (m_pd3dFence->GetCompletedValue() < m_FenceCount) {
-
-    if (m_hFenceEvent == NULL)
-      m_hFenceEvent = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
-
-    // Fire event when GPU hits current fence.
-    m_pd3dFence->SetEventOnCompletion(m_FenceCount, m_hFenceEvent);
-
-    // Wait until the GPU hits current fence event is fired.
-    WaitForSingleObject(m_hFenceEvent, INFINITE);
-  }
+  V(m_pSyncFence->Signal(m_pd3dCommandQueue, &syncPoint));
+  V(m_pSyncFence->WaitForSyncPoint(syncPoint));
 }
 
 DXGI_SAMPLE_DESC D3D12RendererContext::GetMsaaSampleDesc() const {

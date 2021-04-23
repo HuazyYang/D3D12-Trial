@@ -1366,14 +1366,7 @@ void ShapesApp::OnFrameMoved(float fTime, float fElapsedTime) {
   pFrameResources = &m_aFrameResources[m_iCurrentFrameIndex];
 
   /// Sychronize it.
-  if (pFrameResources->FenceCount != 0 && m_pd3dFence->GetCompletedValue() < pFrameResources->FenceCount) {
-
-    if (!m_hFenceEvent)
-      m_hFenceEvent = CreateEventEx(NULL, NULL, 0, EVENT_ALL_ACCESS);
-
-    m_pd3dFence->SetEventOnCompletion(pFrameResources->FenceCount, m_hFenceEvent);
-    WaitForSingleObject(m_hFenceEvent, INFINITE);
-  }
+  m_pSyncFence->WaitForSyncPoint(pFrameResources->FenceCount);
 
   XMMATRIX skullScale = XMMatrixScaling(0.2f, 0.2f, 0.2f);
   XMMATRIX skullOffset = XMMatrixTranslation(3.0f, 2.0f, 0.0f);
@@ -1493,11 +1486,9 @@ void ShapesApp::OnRenderFrame(float fTime, float fElapsedTime) {
   ID3D12CommandList *cmdList[] = {m_pd3dCommandList};
   m_pd3dCommandQueue->ExecuteCommandLists(1, cmdList);
 
+  m_pSyncFence->Signal(m_pd3dCommandQueue, &pFrameResources->FenceCount);
+
   this->Present();
-
-  pFrameResources->FenceCount = ++m_FenceCount;
-
-  m_pd3dCommandQueue->Signal(m_pd3dFence, pFrameResources->FenceCount);
 }
 
 void ShapesApp::RenderSceneToCubeMap(FrameResources *pFrameResources) {

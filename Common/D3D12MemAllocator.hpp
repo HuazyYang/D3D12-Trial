@@ -8,23 +8,24 @@ class Allocator;
 
 typedef D3D12MA::ALLOCATOR_FLAGS D3D12MA_ALLOCATOR_FLAGS;
 typedef D3D12MA::ALLOCATOR_DESC D3D12MA_ALLOCATOR_DESC;
+typedef D3D12MA::ALLOCATION_FLAGS D3D12MA_ALLOCATION_FLAGS;
 typedef D3D12MA::ALLOCATION_DESC D3D12MA_ALLOCATION_DESC;
 
 #define D3D12MA_IID_PPV_ARGS(pAllocation) \
   (pAllocation)->GetAllocationAddressOf(), IID_PPV_ARGS((pAllocation)->ReleaseAndGetAddressOf())
 
-class D3D12MemAllocationSPtr {
+class D3D12MAResourceSPtr {
 public:
-  D3D12MemAllocationSPtr();
-  D3D12MemAllocationSPtr(const D3D12MemAllocationSPtr &);
-  D3D12MemAllocationSPtr(D3D12MemAllocationSPtr &&);
-  D3D12MemAllocationSPtr &operator=(const D3D12MemAllocationSPtr &);
-  D3D12MemAllocationSPtr &operator = (D3D12MemAllocationSPtr&&);
-  D3D12MemAllocationSPtr &operator=(std::nullptr_t);
-  ~D3D12MemAllocationSPtr();
+  D3D12MAResourceSPtr();
+  D3D12MAResourceSPtr(const D3D12MAResourceSPtr &);
+  D3D12MAResourceSPtr(D3D12MAResourceSPtr &&);
+  D3D12MAResourceSPtr &operator=(const D3D12MAResourceSPtr &);
+  D3D12MAResourceSPtr &operator = (D3D12MAResourceSPtr&&);
+  D3D12MAResourceSPtr &operator=(std::nullptr_t);
+  ~D3D12MAResourceSPtr();
 
-  bool operator == (const D3D12MemAllocationSPtr &) const;
-  bool operator != (const D3D12MemAllocationSPtr &) const;
+  bool operator == (const D3D12MAResourceSPtr &) const;
+  bool operator != (const D3D12MAResourceSPtr &) const;
   operator bool() const;
 
   ID3D12Resource *Get() const;
@@ -39,12 +40,12 @@ private:
   D3D12MA::Allocation *m_pMemPtr;
 };
 
-class D3D12MemAllocator {
+class D3D12MAAllocator {
 public:
-  D3D12MemAllocator();
-  D3D12MemAllocator(const D3D12MemAllocator&) = delete;
-  D3D12MemAllocator& operator = (const D3D12MemAllocator &) = delete; 
-  ~D3D12MemAllocator();
+  D3D12MAAllocator();
+  D3D12MAAllocator(const D3D12MAAllocator&) = delete;
+  D3D12MAAllocator& operator = (const D3D12MAAllocator &) = delete; 
+  ~D3D12MAAllocator();
 
   HRESULT Initialize(const D3D12MA_ALLOCATOR_DESC *pDesc);
 
@@ -59,19 +60,19 @@ private:
 //
 // inline implementation
 //
-inline D3D12MA::Allocation **D3D12MemAllocationSPtr::GetAllocationAddressOf() {
+inline D3D12MA::Allocation **D3D12MAResourceSPtr::GetAllocationAddressOf() {
   return &m_pMemPtr;
 }
 
-inline ID3D12Resource **D3D12MemAllocationSPtr::ReleaseAndGetAddressOf() {
+inline ID3D12Resource **D3D12MAResourceSPtr::ReleaseAndGetAddressOf() {
   *this = nullptr;
   return &m_pPtr;
 }
 
-inline D3D12MA::Allocator *D3D12MemAllocator::operator->() const {
+inline D3D12MA::Allocator *D3D12MAAllocator::operator->() const {
   return m_pAllocator;
 }
 
-inline D3D12MA::Allocator *D3D12MemAllocator::Get() const {
+inline D3D12MA::Allocator *D3D12MAAllocator::Get() const {
   return m_pAllocator;
 }

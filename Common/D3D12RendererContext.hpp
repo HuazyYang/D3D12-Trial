@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "D3D12MemAllocator.hpp"
+#include "SyncFence.hpp"
 
 class D3D12RendererContext {
 
@@ -19,7 +20,7 @@ public:
   HRESULT ResizeFrame(int cx, int cy);
 
 protected:
-  friend D3D12MemAllocator& D3D12RendererContextGetMemAllocator();
+  friend D3D12MAAllocator& D3D12RendererContextGetMemAllocator();
   ///
   /// Check device feature support for a given device.
   /// This entry is used for selecting adapter.
@@ -92,7 +93,7 @@ protected:
   IDXGIFactory4 *m_pDXGIFactory;
   IDXGIAdapter1 *m_pDXGIAdapter;
   ID3D12Device5 *m_pd3dDevice;
-  D3D12MemAllocator m_MemAllocator;
+  D3D12MAAllocator m_MemAllocator;
 
   UINT m_uRtvDescriptorSize;
   UINT m_uDsvDescriptorSize;
@@ -102,9 +103,7 @@ protected:
   ID3D12CommandAllocator *m_pd3dDirectCmdAlloc;
   ID3D12GraphicsCommandList4 *m_pd3dCommandList;
 
-  ID3D12Fence *m_pd3dFence;
-  UINT m_FenceCount;
-  HANDLE m_hFenceEvent;
+  SyncFence *m_pSyncFence;
 
   IDXGISwapChain *m_pSwapChain;
 

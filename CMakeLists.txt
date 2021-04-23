@@ -23,6 +23,15 @@ if(MSVC)
 add_compile_options("/MP")
 endif()
 
+#  assimp
+cmake_policy(SET CMP0012 NEW)
+find_package(assimp REQUIRED)
+if(NOT assimp_FOUND)
+message(FATAL_ERROR "Could not find assimp")
+else()
+message(STATUS "assimp library: ${ASSIMP_INCLUDE_DIRS}")
+endif()
+
 set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 set(COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Common)
 set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex)
@@ -36,12 +45,12 @@ set(DXC_BINARY_DIR ${THIRD_PARTY_DIR}/dxc/bin/x64) # DXC binary path
 set(DXC_COMPILER ${DXC_BINARY_DIR}/dxc.exe) # dxc.exe
 
 include_directories(
-  $ENV{VK_SDK_PATH}/include
   ${D3D12MEMORYALLOCATOR_SOURCE_DIR}
   ${THIRD_PARTY_DIR}
   ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader
   ${COMMON_SOURCE_DIR}
   ${THIRD_PARTY_DIR}/dxc/inc # dxc headers
+  ${ASSIMP_INCLUDE_DIRS}
 )
 
 if(CMAKE_BUILD_TYPE)
@@ -52,9 +61,10 @@ if(CMAKE_BUILD_TYPE)
   set(TRIAL_OUTDIR_END_SUFFIX ${CMAKE_BUILD_TYPE})
   set(TRIAL_OUTDIR_SUFFIX ${TRIAL_OUTDIR_END_SUFFIX})
 
-  link_directories(${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX})
-  link_directories(${THIRD_PARTY_DIR}/dxc/lib/x64)
-
+  link_directories(
+    ${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX}
+    ${THIRD_PARTY_DIR}/dxc/lib/x64 ${ASSIMP_LIBRARY_DIRS}
+  )
 else()
   message(FATAL_ERROR "Build type unspecified!")
 endif()
@@ -66,10 +76,11 @@ add_link_options("/NODEFAULTLIB:libcmt.lib")
 endif(MSVC)
 
 add_subdirectory(Common)
-add_subdirectory(D3DTutorial)
-add_subdirectory(NBodyGravity)
-add_subdirectory(HDRToneMappingCS)
-add_subdirectory(HelloDXR)
+# add_subdirectory(D3DTutorial)
+# add_subdirectory(NBodyGravity)
+# add_subdirectory(HDRToneMappingCS)
+# add_subdirectory(HelloDXR)
+add_subdirectory(LoadModel)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})
