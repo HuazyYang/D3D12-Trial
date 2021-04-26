@@ -33,7 +33,7 @@ class D3D12MAResourceSPtr;
 #define RT_ASSERT(expr) ((void)0)
 #ifndef V
 #define V(x)                (hr = (x))
-#define V2(x, ...)           (hr = (x, ##__VA_ARGS))
+#define V2(x, ...)           (hr = (x, ##__VA_ARGS__))
 #endif
 #ifndef V_RETURN
 #define V_RETURN(x)         do { if(FAILED(hr = (x))) {return hr; } } while(0)
@@ -88,6 +88,22 @@ extern HRESULT WINAPI DXTraceW(_In_z_ const WCHAR* strFile, _In_ DWORD dwLine, _
 extern void DXOutputDebugStringA(LPCSTR fmt, ...);
 extern void DXOutputDebugStringW(LPCWSTR fmt, ...);
 
+inline ptrdiff_t AlignUp(ptrdiff_t ptr, size_t alignment) {
+  size_t mask = alignment - 1;
+  RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
+  if((alignment & mask) == 0)
+    ptr = (ptr + mask) & ~mask;
+  return ptr;
+}
+
+inline ptrdiff_t AlignDown(ptrdiff_t ptr, size_t alignment) {
+  size_t mask = alignment - 1;
+  RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
+  if((alignment & mask) == 0)
+    ptr = ptr & ~mask;
+  return ptr;
+}
+
 struct Unknown12
 {
     Unknown12();
@@ -123,7 +139,7 @@ void reconstruct_inplace(void *p, TArgs ...args) {
 
 namespace d3dUtils {
 
-  class DxcCompilerWrapper: public Unknown12 {
+  class DxcCompilerWrapper {
   public:
     DxcCompilerWrapper();
     ~DxcCompilerWrapper();
@@ -174,45 +190,6 @@ namespace d3dUtils {
   );
 
   extern UINT CalcConstantBufferByteSize(UINT uByteSize);
-
-
-  // Get Global Memory Allocator associated with global renderer context.
-  extern
-  D3D12MAAllocator& D3D12RendererContextGetMemAllocator();
-
-  ///
-/// Shader binding table for binding resource between pipeline and resource views,
-/// for example root constants, CBV, SRV, UAV.
-///
-  struct ROOT_CONSTANT_BINDING_ENTRY {
-    UINT Num32BitValues;
-    const void *p32BitValues;
-    UINT Dest32BitOffset;
-  };
-
-  union DESCRIPTOR_BINDING_ENTRY {
-    D3D12_GPU_VIRTUAL_ADDRESS   Address;
-    D3D12_GPU_DESCRIPTOR_HANDLE DescriptorHandle;
-  };
-
-  typedef D3D12_ROOT_PARAMETER_TYPE SHADER_BINDING_ENTRY_TYPE;
-
-  struct SHADER_BINDING_ENTRY {
-    UINT RootParameterIndex;
-    D3D12_ROOT_PARAMETER_TYPE Type;
-    union {
-      ROOT_CONSTANT_BINDING_ENTRY RootConstants;
-      DESCRIPTOR_BINDING_ENTRY    RootDescriptor;
-      DESCRIPTOR_BINDING_ENTRY    DescriptorTableEntry;
-    };
-  };
-
-
-  struct SHADER_BINDING_TABLE {
-    UINT NumBindingEntry;
-    const SHADER_BINDING_ENTRY *pBindingEntries;
-  };
-
 };
 
 #endif /* __D3D_UTILS_HPP__ */

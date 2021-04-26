@@ -27,9 +27,10 @@ HRESULT SyncFence::Initialize(_In_ ID3D12Device *pd3dDevice) {
   HRESULT hr;
 
   m_iNextAvailSyncPoint = 0;
+  SAFE_RELEASE(m_pd3dFence);
   V_RETURN(pd3dDevice->CreateFence(m_iNextAvailSyncPoint, D3D12_FENCE_FLAG_NONE,
                                    IID_PPV_ARGS(&m_pd3dFence)));
-  ++m_iNextAvailSyncPoint;
+  InterlockedIncrement(&m_iNextAvailSyncPoint);
 
   return hr;
 }
@@ -48,9 +49,8 @@ HRESULT SyncFence::Signal(_In_ ID3D12CommandQueue *commitQueue,
     FlushAndReset();
   }
 
-  nextSyncPoint = m_iNextAvailSyncPoint;
+  nextSyncPoint = InterlockedIncrement(&m_iNextAvailSyncPoint);
   V_RETURN(commitQueue->Signal(m_pd3dFence, nextSyncPoint));
-  ++m_iNextAvailSyncPoint;
   if (pQueuedSyncPoint)
     *pQueuedSyncPoint = nextSyncPoint;
 

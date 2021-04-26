@@ -12,6 +12,13 @@ if(NOT CMAKE_BUILD_TYPE OR NOT CMAKE_CONFIGURATION_TYPES)
     "MinSizeRel" "RelWithDebInfo")
 endif()
 
+if(CMAKE_BUILD_TYPE)
+  set(TRIAL_OUTDIR_END_SUFFIX ${CMAKE_BUILD_TYPE})
+  set(TRIAL_OUTDIR_SUFFIX ${TRIAL_OUTDIR_END_SUFFIX})
+else()
+  message(FATAL_ERROR "Build type unspecified!")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -34,7 +41,7 @@ endif()
 
 set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 set(COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Common)
-set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex)
+set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex/DirectXTex)
 set(D3D12MEMORYALLOCATOR_SOURCE_DIR ${THIRD_PARTY_DIR}/D3D12MemoryAllocator/src)
 set(ASSIMP_INCLUDE_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/include)
 set(ASSIMP_CONFIG_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/build/include)
@@ -47,33 +54,26 @@ set(DXC_COMPILER ${DXC_BINARY_DIR}/dxc.exe) # dxc.exe
 include_directories(
   ${D3D12MEMORYALLOCATOR_SOURCE_DIR}
   ${THIRD_PARTY_DIR}
-  ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader
+  ${DIRECTXTEX_SOURCE_DIR}
   ${COMMON_SOURCE_DIR}
   ${THIRD_PARTY_DIR}/dxc/inc # dxc headers
   ${ASSIMP_INCLUDE_DIRS}
 )
 
-if(CMAKE_BUILD_TYPE)
-  string(TOUPPER "${CMAKE_BUILD_TYPE}" MY_CXX_BUILD_TYPE_EXT)
-  string(TOUPPER "_${CMAKE_BUILD_TYPE}" MY_C_BUILD_TYPE_EXT)
-  add_compile_definitions(${MY_C_BUILD_TYPE_EXT} ${MY_CXX_BUILD_TYPE_EXT})
-
-  set(TRIAL_OUTDIR_END_SUFFIX ${CMAKE_BUILD_TYPE})
-  set(TRIAL_OUTDIR_SUFFIX ${TRIAL_OUTDIR_END_SUFFIX})
-
-  link_directories(
-    ${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX}
-    ${THIRD_PARTY_DIR}/dxc/lib/x64 ${ASSIMP_LIBRARY_DIRS}
-  )
+if(${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
+add_compile_definitions("_DEBUG" "DEBUG")
 else()
-  message(FATAL_ERROR "Build type unspecified!")
+add_compile_definitions("NDEBUG")
 endif()
+
+link_directories(
+  ${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX}
+  ${THIRD_PARTY_DIR}/dxc/lib/x64 ${ASSIMP_LIBRARY_DIRS}
+)
 
 add_compile_definitions("UNICODE" "_UNICODE")
 
-if(MSVC)
 add_link_options("/NODEFAULTLIB:libcmt.lib")
-endif(MSVC)
 
 add_subdirectory(Common)
 # add_subdirectory(D3DTutorial)

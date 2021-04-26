@@ -4,6 +4,8 @@
 #include "Model.hpp"
 #include "HpFileIo.h"
 #include "SDKmesh.h"
+#include <Texture.h>
+#include <filesystem>
 #include <map>
 
 using Microsoft::WRL::ComPtr;
@@ -58,7 +60,7 @@ inline XMFLOAT3 GetMaterialColor(float r, float g, float b, bool srgb) noexcept 
   }
 }
 
-void InitMaterial(const DXUT::SDKMESH_MATERIAL& mh, unsigned int flags, _Out_ Model::ModelMaterialInfo& m,
+void InitMaterial(const DXUT::SDKMESH_MATERIAL& mh, unsigned int flags, _Out_ ModelMaterialInfo& m,
                   _Inout_ std::map<std::wstring, int32_t>& textureDictionary, bool srgb) {
   wchar_t matName[DXUT::MAX_MATERIAL_NAME] = {};
   ASCIIToWChar(matName, mh.Name);
@@ -124,7 +126,7 @@ void InitMaterial(const DXUT::SDKMESH_MATERIAL& mh, unsigned int flags, _Out_ Mo
   m.samplerIndex2 = (flags & DUAL_TEXTURE) ? static_cast<int>(STATIC_SAMPLER_INDEX_ANISOINTROPIC_WRAP) : -1;
 }
 
-void InitMaterial(const DXUT::SDKMESH_MATERIAL_V2& mh, unsigned int flags, _Out_ Model::ModelMaterialInfo& m,
+void InitMaterial(const DXUT::SDKMESH_MATERIAL_V2& mh, unsigned int flags, _Out_ ModelMaterialInfo& m,
                   _Inout_ std::map<std::wstring, int>& textureDictionary) {
   wchar_t matName[DXUT::MAX_MATERIAL_NAME] = {};
   ASCIIToWChar(matName, mh.Name);
@@ -399,7 +401,7 @@ HRESULT GetInputLayoutDesc(_In_reads_(32) const DXUT::D3DVERTEXELEMENT9 decl[],
 };
 
 _Use_decl_annotations_
-HRESULT Model::CreateFromSDKMESH(_In_ ID3D12Device* pDevice, _In_ D3D12MAAllocator* pAllocator,
+HRESULT Model::CreateFromSDKMESH(_In_ ResourceUploadBatch *pUploadBatch,
                                  _In_ LPCWSTR pszFilePath, _In_ ModelLoaderFlags flags) {
 
   HRESULT hr;
@@ -407,15 +409,19 @@ HRESULT Model::CreateFromSDKMESH(_In_ ID3D12Device* pDevice, _In_ D3D12MAAllocat
 
   V_RETURN(HpFileIo::ReadFileDirectly(pszFilePath, 0, 0, &pFileDataBlob));
 
-  return CreateFromSDKMESH(pDevice, pAllocator, (const uint8_t*)pFileDataBlob->GetBufferPointer(),
+  filePath = pszFilePath;
+
+  return CreateFromSDKMESH(pUploadBatch, (const uint8_t*)pFileDataBlob->GetBufferPointer(),
                            pFileDataBlob->GetBufferSize(), flags);
 }
 
 _Use_decl_annotations_
-HRESULT Model::CreateFromSDKMESH(_In_ ID3D12Device* pDevice, _In_ D3D12MAAllocator* pAllocator,
+HRESULT Model::CreateFromSDKMESH(_In_ ResourceUploadBatch *pUploadBatch,
                                  _In_ const uint8_t* pData, _In_ size_t iDataSize, _In_ ModelLoaderFlags flags) {
 
   HRESULT hr;
+
+  D3D12MA_ALLOCATION_DESC defaultAllocDesc = {};
 
   if (pData == nullptr)
     V_RETURN2("Invalid argument!", E_INVALIDARG);
@@ -529,10 +535,17 @@ HRESULT Model::CreateFromSDKMESH(_In_ ID3D12Device* pDevice, _In_ D3D12MAAllocat
     if (dataSize < vh.DataOffset || (dataSize < vh.DataOffset + vh.SizeBytes))
       V_RETURN2("End of file", E_INVALIDARG);
 
-    vbDecls[j]           = std::make_shared<std::vector<D3D12_INPUT_ELEMENT_DESC>>();
+    auto vbDecl           = std::make_shared<std::vector<D3D12_INPUT_ELEMENT_DESC>>();
     unsigned int ilflags;
     
-    V_RETURN(Internal::GetInputLayoutDesc(vh.Decl, *vbDecls[j].get(), ilflags));
+    V_RETURN(Internal::GetInputLayoutDesc(vh.Decl, *vbDecl.get(), ilflags));
+    if(auto vbDeclPos = std::find_if(vbDecls.begin(), vbDecls.end(), [vbDecl](const auto &val) {
+      return val && val->size() == vbDecl->size() && memcmp(val->data(), vbDecl->data(), val->size() * sizeof(D3D12_INPUT_ELEMENT_DESC)) == 0;
+    }); vbDeclPos == vbDecls.end()) {
+      vbDecls[j] = (std::move(vbDecl));
+    } else {
+      vbDecls[j] = *vbDeclPos;
+    }
 
     if (ilflags & Internal::SKINNING) {
       ilflags &= ~static_cast<unsigned int>(Internal::DUAL_TEXTURE | Internal::NORMAL_MAPS);
@@ -689,33 +702,53 @@ HRESULT Model::CreateFromSDKMESH(_In_ ID3D12Device* pDevice, _In_ D3D12MAAllocat
       part->indexFormat =
           (ibArray[mh.IndexBuffer].IndexType == DXUT::IT_32BIT) ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT;
 
-      D3D12MA_ALLOCATION_DESC uploadAllocDesc = {};
+      D3D12_SUBRESOURCE_DATA subres;
 
-      uploadAllocDesc.Flags = D3D12MA::ALLOCATION_FLAG_NONE;
-      uploadAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+      defaultAllocDesc.Flags = D3D12MA::ALLOCATION_FLAG_NONE;
+      defaultAllocDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
 
       // Vertex data
       auto verts             = bufferData + (vh.DataOffset - bufferDataOffset);
       auto vbytes            = static_cast<size_t>(vh.SizeBytes);
       part->vertexBufferSize = static_cast<uint32_t>(vh.SizeBytes);
 
-      (*pAllocator)->CreateResource(
-        &uploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vbytes), D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, D3D12MA_IID_PPV_ARGS(&part->vertexBuffer)
+      (*pUploadBatch->GetAllocator())->CreateResource(
+        &defaultAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vbytes), D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr, D3D12MA_IID_PPV_ARGS(&part->staticVertexBuffer)
       );
-      VOID *uploadBufferAddr;
-      part->vertexBuffer->Map(0, nullptr, &uploadBufferAddr);
-      memcpy(uploadBufferAddr, verts, vbytes);
+
+      subres.pData = verts;
+      subres.RowPitch = vbytes;
+      subres.SlicePitch = vbytes;
+
+      pUploadBatch->Enqueue(
+        part->staticVertexBuffer.Get(),
+        0, 1, &subres
+      );
 
       // Index data
       auto indices          = bufferData + (ih.DataOffset - bufferDataOffset);
       auto ibytes           = static_cast<size_t>(ih.SizeBytes);
       part->indexBufferSize = static_cast<uint32_t>(ih.SizeBytes);
-      (*pAllocator)->CreateResource(&uploadAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(vbytes), D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, D3D12MA_IID_PPV_ARGS(&part->indexBuffer)
+
+      (*pUploadBatch->GetAllocator())->CreateResource(
+        &defaultAllocDesc, &CD3DX12_RESOURCE_DESC::Buffer(ibytes), D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr, D3D12MA_IID_PPV_ARGS(&part->staticIndexBuffer)
       );
-      part->indexBuffer->Map(0, nullptr, &uploadBufferAddr);
-      memcpy(uploadBufferAddr, indices, ibytes);
+
+      subres.pData = indices;
+      subres.RowPitch = ibytes;
+      subres.SlicePitch = ibytes;
+      pUploadBatch->Enqueue(
+        part->staticIndexBuffer.Get(),
+        0, 1, &subres
+      );
+
+      CD3DX12_RESOURCE_BARRIER resBarriers[2] = {
+        CD3DX12_RESOURCE_BARRIER::Transition(part->staticVertexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON),
+        CD3DX12_RESOURCE_BARRIER::Transition(part->staticIndexBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COMMON)
+      };
+      pUploadBatch->ResourceBarrier(2, resBarriers);
 
       part->materialIndex = subset.MaterialID;
       part->vbDecl        = vbDecls[mh.VertexBuffers[0]];
@@ -729,12 +762,43 @@ HRESULT Model::CreateFromSDKMESH(_In_ ID3D12Device* pDevice, _In_ D3D12MAAllocat
     model->meshes.emplace_back(mesh);
   }
 
+  model->inputLayouts = std::move(vbDecls);
+  model->inputLayouts.resize(std::unique(model->inputLayouts.begin(), model->inputLayouts.end()) - model->inputLayouts.begin());
+
+  DirectX::TexMetadata texMetaData;
+  DirectX::ScratchImage scratchImage;
+  std::vector<D3D12_SUBRESOURCE_DATA> subres;
+  std::filesystem::path parentPath(filePath), texPath;
+
+  parentPath = parentPath.parent_path();
+
   // Copy the materials and texture names into contiguous arrays
   model->materials = std::move(materials);
-  model->textureNames.resize(textureDictionary.size());
+  model->texturesCache.resize(textureDictionary.size());
   for (auto texture = std::cbegin(textureDictionary); texture != std::cend(textureDictionary); ++texture) {
-    model->textureNames[static_cast<size_t>(texture->second)] = texture->first;
+
+    auto &textureCache = model->texturesCache[static_cast<size_t>(texture->second)];
+    textureCache.name = texture->first;
+
+    texPath = parentPath;
+    texPath.append(textureCache.name);
+
+    if(SUCCEEDED(DirectX::LoadFromDDSFile(texPath.c_str(), DirectX::DDS_FLAGS_NONE, &texMetaData, scratchImage))) {
+      V_RETURN(DirectX::PrepareUpload(pUploadBatch->GetDevice(), scratchImage.GetImages(), scratchImage.GetImageCount(),
+                                      texMetaData, subres));
+      V_RETURN(DirectX::CreateTexture(pUploadBatch->GetDevice(), pUploadBatch->GetAllocator(), texMetaData,
+                                      &textureCache.defaultBuffer));
+
+      pUploadBatch->Enqueue(textureCache.defaultBuffer.Get(), 0, (UINT)subres.size(), subres.data());
+      pUploadBatch->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(textureCache.defaultBuffer.Get(),
+                                                                             D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                             D3D12_RESOURCE_STATE_COMMON));
+      textureCache.descriptorIndex = texture->second;
+    } else
+      textureCache.descriptorIndex = -1;
   }
+
+  std::swap(*this, *model);
 
   return hr;
 }

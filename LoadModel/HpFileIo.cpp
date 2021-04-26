@@ -1,5 +1,4 @@
 #include <windows.h>
-#include <winioctl.h>
 #include <cstdint>
 #include <algorithm>
 #include "HpFileIo.h"
@@ -7,7 +6,11 @@
 #undef min
 #undef max
 
-#define _DIRECTIO_NO_BUFFERING 0
+#define _ALIGN_UP(ptr, alignment)                                                                                      \
+  (ULONG_PTR)(((ULONG_PTR)(ptr) + (ULONG_PTR)(alignment)-1) & ~((ULONG_PTR)(alignment)-1))
+#define _ALIGN_DOWN(ptr, alignment) (ULONG_PTR)((ULONG_PTR)(ptr) & ~((ULONG_PTR)(alignment)-1))
+
+#define _DIRECTIO_NO_BUFFERING 1
 
 namespace HpFileIo {
 
@@ -99,7 +102,7 @@ HRESULT _MapFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iRe
   }
 
   GetSystemInfo(&sysInfo);
-  startOffset.QuadPart = iOffsetInBytes & ~((ptrdiff_t)sysInfo.dwAllocationGranularity - 1);
+  startOffset.QuadPart = _ALIGN_DOWN(iOffsetInBytes, sysInfo.dwAllocationGranularity);
   if (iReqSizeInBytes) {
     endOffset.QuadPart = iOffsetInBytes + iReqSizeInBytes;
   } else {
@@ -107,14 +110,15 @@ HRESULT _MapFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iRe
     iReqSizeInBytes = endOffset.QuadPart - iOffsetInBytes;
   }
 
-  reqSize.QuadPart = endOffset.QuadPart - startOffset.QuadPart;
+  reqSize.QuadPart = (endOffset.QuadPart - startOffset.QuadPart);
 
   hFileMapping = CreateFileMappingW(hFile, NULL, PAGE_READONLY, reqSize.HighPart, reqSize.LowPart, NULL);
   CloseHandle(hFile);
   if (hFileMapping == NULL)
     return HRESULT_FROM_WIN32(GetLastError());
 
-  pMappedView = MapViewOfFile(hFileMapping, FILE_MAP_READ, startOffset.HighPart, startOffset.LowPart, 0);
+  pMappedView = MapViewOfFile(hFileMapping, FILE_MAP_READ, startOffset.HighPart, startOffset.LowPart,
+                              _ALIGN_UP(reqSize.QuadPart, sysInfo.dwPageSize));
   if (pMappedView == NULL) {
     CloseHandle(hFileMapping);
     return HRESULT_FROM_WIN32(GetLastError());
@@ -172,14 +176,13 @@ HRESULT _ReadFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iR
   }
 
 #if _DIRECTIO_NO_BUFFERING
-  startOffset.QuadPart = iOffsetInBytes & ~((ptrdiff_t)sysInfo.dwPageSize - 1);
+  startOffset.QuadPart = _ALIGN_DOWN(iOffsetInBytes, sysInfo.dwPageSize);
   if (iReqSizeInBytes) {
-    endOffset.QuadPart =
-      (iOffsetInBytes + (ptrdiff_t)iReqSizeInBytes + sysInfo.dwPageSize - 1) & ~((ptrdiff_t)sysInfo.dwPageSize - 1);
+    endOffset.QuadPart = _ALIGN_UP(iOffsetInBytes + (ptrdiff_t)iReqSizeInBytes, sysInfo.dwPageSize);
   } else {
     endOffset.QuadPart = fileSize;
     iReqSizeInBytes    = endOffset.QuadPart - iOffsetInBytes;
-    endOffset.QuadPart = (endOffset.QuadPart + sysInfo.dwPageSize - 1) & ~((ptrdiff_t)sysInfo.dwPageSize - 1);
+    endOffset.QuadPart = _ALIGN_UP(endOffset.QuadPart, sysInfo.dwPageSize);
   }
 #else
   startOffset.QuadPart = iOffsetInBytes;
@@ -191,7 +194,7 @@ HRESULT _ReadFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iR
   }
 #endif
 
-  reqSize.QuadPart = endOffset.QuadPart - startOffset.QuadPart;
+  reqSize.QuadPart = _ALIGN_UP(endOffset.QuadPart - startOffset.QuadPart, sysInfo.dwPageSize);
 
   pv = (uint8_t *)VirtualAlloc(NULL, reqSize.QuadPart, MEM_COMMIT, PAGE_READWRITE);
   if (pv == NULL) {
@@ -302,9 +305,9 @@ HRESULT ReadFileDirectly(_In_ const wchar_t *pFileName, _In_ ptrdiff_t iOffsetIn
   if (ppResult == nullptr)
     return E_INVALIDARG;
 
-  // hr = _MapFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
-  // if (FAILED(hr))
-  hr = _ReadFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
+  hr = _MapFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
+  if (FAILED(hr))
+    hr = _ReadFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
   return hr;
 }
 

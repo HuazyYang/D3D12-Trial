@@ -24,7 +24,7 @@ private:
   virtual ~SyncFence();
 
   ID3D12Fence *m_pd3dFence;
-  UINT64 m_iNextAvailSyncPoint;
+  volatile UINT64 m_iNextAvailSyncPoint;
   HANDLE m_hSyncEvent;
 };
 

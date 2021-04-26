@@ -3,7 +3,9 @@
         {
             "name": "Win32",
             "includePath": [
-                "${workspaceFolder}/**"
+                "./Common",
+                "../ThirdParty/DirectXTex/DirectXTex",
+                "../ThirdParty/D3D12MemoryAllocator/src"
             ],
             "defines": [
                 "_DEBUG",

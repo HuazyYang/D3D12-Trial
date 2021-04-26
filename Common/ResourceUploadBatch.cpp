@@ -22,6 +22,14 @@ public:
     m_uInternalState = 0x0;
   }
 
+  D3D12MAAllocator *GetAllocator() const {
+    return m_pAllocator;
+  }
+
+  ID3D12Device *GetDevice() const {
+    return m_pd3dDevice.Get();
+  }
+
   HRESULT Begin(D3D12_COMMAND_LIST_TYPE cmdListType) {
 
     HRESULT hr;
@@ -30,8 +38,8 @@ public:
     if (m_uInternalState != 0) {
       // Already have a once.
       V_RETURN2("ResourceUploadBatch: resources are in use!", E_FAIL);
-    } else if (cmdListType != D3D12_COMMAND_LIST_TYPE_DIRECT ||
-               cmdListType != D3D12_COMMAND_LIST_TYPE_COPY ||
+    } else if (cmdListType != D3D12_COMMAND_LIST_TYPE_DIRECT &&
+               cmdListType != D3D12_COMMAND_LIST_TYPE_COPY &&
                cmdListType != D3D12_COMMAND_LIST_TYPE_COMPUTE) {
       V_RETURN2("Command list type must be direct, copy or compute!", E_INVALIDARG);
     }
@@ -51,7 +59,7 @@ public:
     return hr;
   }
 
-  HRESULT End(_In_ ID3D12CommandQueue *commitQueue, std::future<HRESULT> *waitable) {
+  HRESULT End(_In_ ID3D12CommandQueue *commitQueue, _Out_ std::future<HRESULT> *waitable) {
     HRESULT hr;
 
     // Sanity check
@@ -64,13 +72,14 @@ public:
     commitQueue->ExecuteCommandLists(1, CommandListCast(m_pd3dCommandList.GetAddressOf()));
 
     if (waitable) {
-      if (!m_pSyncFence) {
-        V_RETURN(CreateSyncFence(m_pSyncFence.GetAddressOf()));
-        V_RETURN(m_pSyncFence->Initialize(m_pd3dDevice.Get()));
-      }
 
       UINT64 syncPoint;
       FrameResource *pFrameResource;
+
+      if(!m_pSyncFence) {
+        V_RETURN(CreateSyncFence(m_pSyncFence.GetAddressOf()));
+        V_RETURN(m_pSyncFence->Initialize(m_pd3dDevice.Get()));
+      }
 
       V_RETURN(m_pSyncFence->Signal(commitQueue, &syncPoint));
 
@@ -99,16 +108,18 @@ public:
     return hr;
   }
 
-  HRESULT Enqueue(_In_ ID3D12Resource *pResourceDefault, _In_ uint32_t subresourceIndexStart,
-                  _In_reads_(numSubresources) const D3D12_SUBRESOURCE_DATA *subRes,
-                  _In_ uint32_t numSubresources) {
+  HRESULT Enqueue(
+  _In_ ID3D12Resource *pDestResource,
+  _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
+  _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
+  _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) {
     HRESULT hr;
 
     if (!(m_uInternalState & 0x1))
       V_RETURN2("ResourceUploadBatch: call \"Begin\" first!", E_FAIL);
 
     UINT64 uploadSize =
-        GetRequiredIntermediateSize(pResourceDefault, subresourceIndexStart, numSubresources);
+        GetRequiredIntermediateSize(pDestResource, FirstSubresource, NumSubresources);
 
     D3D12MA_ALLOCATION_DESC allocDesc = {};
     allocDesc.Flags = D3D12MA::ALLOCATION_FLAG_NONE;
@@ -121,8 +132,8 @@ public:
                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                                   D3D12MA_IID_PPV_ARGS(&scratchResource)));
 
-    UpdateSubresources(m_pd3dCommandList.Get(), pResourceDefault, scratchResource.Get(), 0,
-                       subresourceIndexStart, numSubresources, subRes);
+    UpdateSubresources(m_pd3dCommandList.Get(), pDestResource, scratchResource.Get(), 0,
+                       FirstSubresource, NumSubresources, pSrcData);
 
     m_aUploadBuffers.push_back(std::move(scratchResource));
 
@@ -169,6 +180,8 @@ ResourceUploadBatch::ResourceUploadBatch(_In_ ID3D12Device *pDevice, _In_ D3D12M
   m_pImpl = std::make_unique<Impl>(pDevice, pAllocator);
 }
 
+ResourceUploadBatch::~ResourceUploadBatch() {}
+
 HRESULT ResourceUploadBatch::Begin(D3D12_COMMAND_LIST_TYPE commandListType) {
   return m_pImpl->Begin(commandListType);
 }
@@ -177,10 +190,12 @@ HRESULT ResourceUploadBatch::End(_In_ ID3D12CommandQueue *commitQueue, _Out_opt_
   return m_pImpl->End(commitQueue, waitable);
 }
 
-HRESULT ResourceUploadBatch::Enqueue(_In_ ID3D12Resource *pResourceDefault, _In_ uint32_t subresourceIndexStart,
-                _In_reads_(numSubresources) const D3D12_SUBRESOURCE_DATA *subRes,
-                _In_ uint32_t numSubresources) {
-  return m_pImpl->Enqueue(pResourceDefault, subresourceIndexStart, subRes, numSubresources);
+HRESULT ResourceUploadBatch::Enqueue(
+  _In_ ID3D12Resource *pDestResource,
+  _In_range_(0,D3D12_REQ_SUBRESOURCES) UINT FirstSubresource,
+  _In_range_(0,D3D12_REQ_SUBRESOURCES-FirstSubresource) UINT NumSubresources,
+  _In_reads_(NumSubresources) const D3D12_SUBRESOURCE_DATA* pSrcData) {
+  return m_pImpl->Enqueue(pDestResource, FirstSubresource, NumSubresources, pSrcData);
 }
 
 HRESULT ResourceUploadBatch::Enqueue(_In_ ID3D12Resource *pResourceDefault, _In_ const D3D12MAResourceSPtr *uploadBuffer) {
@@ -189,4 +204,12 @@ HRESULT ResourceUploadBatch::Enqueue(_In_ ID3D12Resource *pResourceDefault, _In_
 
 void ResourceUploadBatch::ResourceBarrier(_In_ uint32_t numBarriers, _In_ const D3D12_RESOURCE_BARRIER *pBarriers) {
   return m_pImpl->ResourceBarrier(numBarriers, pBarriers);
+}
+
+D3D12MAAllocator *ResourceUploadBatch::GetAllocator() const {
+  return m_pImpl->GetAllocator();
+}
+
+ID3D12Device *ResourceUploadBatch::GetDevice() const {
+  return m_pImpl->GetDevice();
 }

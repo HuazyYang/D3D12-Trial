@@ -21,8 +21,6 @@ set(src_files
   Common.h
   GameTimer.cpp
   MeshBuffer.cpp
-  RenderableItem.cpp
-  RenderableMaterialList.cpp
   RootSignatureGenerator.cpp
   Texture.cpp
   UploadBuffer.cpp
@@ -33,16 +31,12 @@ set(src_files
   GameTimer.hpp
   GeometryGenerator.h
   MeshBuffer.h
-  RenderableItem.h
-  RenderableMaterialList.h
   RootSignatureGenerator.h
   Texture.h
   UploadBuffer.h
   Win32Application.cpp
   Win32Application.hpp
   UIController.hpp
-  ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader/DDSTextureLoader12.cpp
-  ${DIRECTXTEX_SOURCE_DIR}/DDSTextureLoader/DDSTextureLoader12.h
 )
 
 set(D3D12MemoryAllocatorSrc

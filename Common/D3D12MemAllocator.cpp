@@ -1,6 +1,5 @@
 #include "d3dUtils.h"
 #include "D3D12MemAllocator.hpp"
-#include <D3D12MemAlloc.h>
 
 D3D12MAResourceSPtr::D3D12MAResourceSPtr() {
   m_pPtr = nullptr;
@@ -40,10 +39,10 @@ D3D12MAResourceSPtr &D3D12MAResourceSPtr::operator=(const D3D12MAResourceSPtr &r
 D3D12MAResourceSPtr &D3D12MAResourceSPtr::operator=(std::nullptr_t) {
 
   if (m_pPtr) {
-    if (m_pPtr->AddRef() == 3) {
+    if (m_pPtr->AddRef() == ((m_pMemPtr != nullptr) + 2)) {
       m_pPtr->Release();
       m_pPtr->Release();
-      m_pMemPtr->Release();
+      m_pMemPtr ? m_pMemPtr->Release() : nullptr;
     } else {
       m_pPtr->Release();
       m_pPtr->Release();
