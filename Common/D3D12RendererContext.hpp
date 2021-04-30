@@ -20,7 +20,6 @@ public:
   HRESULT ResizeFrame(int cx, int cy);
 
 protected:
-  friend D3D12MAAllocator& D3D12RendererContextGetMemAllocator();
   ///
   /// Check device feature support for a given device.
   /// This entry is used for selecting adapter.

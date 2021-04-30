@@ -1,31 +1,84 @@
 #include "Common.h"
 #include "D3D12RendererContext.hpp"
-#include "GameTimer.hpp"
-#include "UIController.hpp"
+#include "Win32Application.hpp"
 #include <Windows.h>
 #include <memory>
 #include <string.h>
 
-struct FrameStatistics {
-  uint32_t LastFrameCount;
-  uint32_t TotalFrameCount;
-  double LastTimeStamp;
-  std::wstring Title;
-};
+WindowInteractor::WindowInteractor() {
+  m_hWnd = NULL;
+  m_bEnabled = true;
+  m_FrameStat.FPS = .0;
+  m_FrameStat.LastFrameCount = 0;
+  m_FrameStat.TotalFrameCount = 0;
+
+  Reset();
+}
+
+HWND WindowInteractor::GetHwnd() const {
+  return m_hWnd;
+}
+
+WindowInteractor::~WindowInteractor() {
+}
+
+void WindowInteractor::Reset() {
+  m_GlobalTimer.Reset();
+  m_FrameStat.LastTimeStamp = .0;
+}
+
+bool WindowInteractor::IsPaused() const {
+  return m_GlobalTimer.IsPaused();
+}
+
+void WindowInteractor::SetPaused(bool paused) {
+  paused ? m_GlobalTimer.Stop() : m_GlobalTimer.Resume();
+}
+
+void WindowInteractor::Tick() {
+  m_GlobalTimer.Tick();
+
+  if(!m_GlobalTimer.IsPaused()) {
+    double sampleInterval;
+    m_FrameStat.LastFrameCount += 1;
+    m_FrameStat.TotalFrameCount += 1;
+
+    if ((sampleInterval = (m_GlobalTimer.GetTime() - m_FrameStat.LastTimeStamp)) >= 1.0) {
+      m_FrameStat.FPS = m_FrameStat.LastFrameCount / sampleInterval;
+      m_FrameStat.LastTimeStamp = m_GlobalTimer.GetTime();
+      m_FrameStat.LastFrameCount = 0;
+    }
+  }
+}
+
+double WindowInteractor::GetFPS() const {
+  return m_FrameStat.FPS;
+}
+
+double WindowInteractor::GetTotalTime() const {
+  return m_GlobalTimer.GetTime();
+}
+double WindowInteractor::GetElapsedTime() const {
+  return m_GlobalTimer.GetElapsedTime();
+}
+
+LRESULT WindowInteractor::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+
+  *pbNoFurtherProcessing = false;
+  return 0;
+}
 
 struct _WindowContext {
   D3D12RendererContext *pRenderer;
-  IUIController *pUIController;
-  GameTimer Timer;
-  BOOL Paused;
-
-  FrameStatistics FrameStat;
+  WindowInteractor *pInteractor;
+  BOOL Resizing;
+  std::wstring Title;
 };
 
 static LRESULT CALLBACK MainWndProc(HWND hwnd, UINT uMsg, WPARAM wp, LPARAM lp);
 static void ReportFrameStats(HWND hwnd, float fTime, float fElapsed);
 
-int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState, _In_ int iWindowWidth,
+int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ WindowInteractor *pInteractor, _In_ int iWindowWidth,
               _In_ int iWindowHeight, _In_ const wchar_t *pWindowTitle) {
 
   HRESULT hr;
@@ -66,12 +119,9 @@ int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState
 
   pWndContext = std::make_unique<_WindowContext>();
   pWndContext->pRenderer = pRenderer;
-  pWndContext->pUIController = pUIState;
-  pWndContext->Paused = FALSE;
-  pWndContext->FrameStat.Title = pWindowTitle;
-  pWndContext->FrameStat.LastFrameCount = 0;
-  pWndContext->FrameStat.TotalFrameCount = 0;
-  pWndContext->FrameStat.LastTimeStamp = 0.0;
+  pWndContext->pInteractor = pInteractor;
+  pWndContext->Resizing = FALSE;
+  pWndContext->Title = pWindowTitle;
 
   hMainWnd = CreateWindowW(wcx.lpszClassName, pWindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
                            rect.right - rect.left, rect.bottom - rect.top, NULL, NULL, wcx.hInstance,
@@ -79,6 +129,8 @@ int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState
   if (!hMainWnd) {
     V_RETURN(E_FAIL);
   }
+  pWndContext->pInteractor->m_hWnd = hMainWnd;
+
   GetClientRect(hMainWnd, &rect);
   V_RETURN(pWndContext->pRenderer->Initialize(hMainWnd, rect.right, rect.bottom));
   PostMessage(hMainWnd, WM_SIZE, SIZE_RESTORED, MAKELPARAM(rect.right, rect.bottom));
@@ -89,26 +141,24 @@ int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState
   MSG msg = {0};
 
   float fTime, fElapsed;
-  pWndContext->Timer.Reset();
+  pWndContext->pInteractor->Reset();
 
   while (msg.message != WM_QUIT) {
     // If there are Window messsages, then process them
     if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
       TranslateMessage(&msg);
       DispatchMessage(&msg);
-    } else {
-      pWndContext->Timer.Tick();
-      fElapsed = (float)pWndContext->Timer.TotalElapsed();
-      fTime = (float)pWndContext->Timer.DeltaElasped();
+    } else if(!pWndContext->pInteractor->IsPaused()) {
 
-      if (!pWndContext->Paused) {
-        ReportFrameStats(hMainWnd, fTime, fElapsed);
-        pRenderer->Update(fTime, fElapsed);
-        pRenderer->RenderFrame(fTime, fElapsed);
-      } else {
-        Sleep(10);
-      }
-    }
+      fTime = (float)pWndContext->pInteractor->GetTotalTime();
+      fElapsed = (float)pWndContext->pInteractor->GetElapsedTime();
+      pWndContext->pInteractor->Tick();
+
+      ReportFrameStats(hMainWnd, fTime, fElapsed);
+      pRenderer->Update(fTime, fElapsed);
+      pRenderer->RenderFrame(fTime, fElapsed);
+    } else
+      Sleep(10);
   }
 
   pRenderer->Destroy();
@@ -117,21 +167,20 @@ int RunSample(_In_ D3D12RendererContext *pRenderer, _In_ IUIController *pUIState
 }
 
 void ReportFrameStats(HWND hwnd, float fTime, float fElapsed) {
-  double timeInterval = 0.0;
+  static double tmInterval = .0;
 
   _WindowContext *pWndContext = reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
 
-  pWndContext->FrameStat.LastFrameCount += 1;
-  pWndContext->FrameStat.TotalFrameCount += 1;
+  tmInterval += fElapsed;
 
-  if ((timeInterval = (pWndContext->Timer.TotalElapsed() - pWndContext->FrameStat.LastTimeStamp)) >= 1.0) {
+  if (tmInterval > 1.0) {
     wchar_t buff[128];
-    _snwprintf_s(buff, _countof(buff), L"%s, FPS:%3.1f, MSPF:%.3f", pWndContext->FrameStat.Title.c_str(),
-                 (float)(pWndContext->FrameStat.LastFrameCount / timeInterval),
-                 (float)(timeInterval / pWndContext->FrameStat.LastFrameCount));
-    pWndContext->FrameStat.LastTimeStamp = pWndContext->Timer.TotalElapsed();
-    pWndContext->FrameStat.LastFrameCount = 0;
+    _snwprintf_s(buff, _countof(buff), L"%s, FPS:%3.1f, MSPF:%.3f", pWndContext->Title.c_str(),
+      static_cast<float>(pWndContext->pInteractor->GetFPS()),
+      static_cast<float>(1000.0 / pWndContext->pInteractor->GetFPS())
+    );
     SetWindowTextW(hwnd, buff);
+    tmInterval = .0;
   }
 }
 
@@ -140,54 +189,50 @@ extern LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPAR
 
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
-  ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
-
   _WindowContext *pWndContext = reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
   switch (msg) {
   case WM_CREATE: {
     LPCREATESTRUCT pCreateStruct = (LPCREATESTRUCT)lp;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)pCreateStruct->lpCreateParams);
-    return 0;
+    pWndContext = reinterpret_cast<_WindowContext *>(pCreateStruct->lpCreateParams);
+    break;
   }
     // WM_ACTIVATE is sent when the window is activated or deactivated.
     // We pause the game when the window is deactivated and unpause it
     // when it becomes active.
   case WM_ACTIVATE:
     if (LOWORD(wp) == WA_INACTIVE) {
-      pWndContext->Paused = TRUE;
-      pWndContext->Timer.Stop();
+      pWndContext->pInteractor->SetPaused(true);
     } else {
-      pWndContext->Paused = FALSE;
-      pWndContext->Timer.Resume();
+      pWndContext->pInteractor->SetPaused(false);
     }
-    return 0;
+    break;
     // WM_SIZE is sent when the user resizes the window.
   case WM_SIZE:
     LONG cx, cy;
     cx = LOWORD(lp);
     cy = HIWORD(lp);
     if (wp == SIZE_MINIMIZED) {
-      pWndContext->Paused = TRUE;
-      pWndContext->Timer.Stop();
-    } else if (!(pWndContext->Paused & 0x10)) {
+      pWndContext->pInteractor->SetPaused(true);
+    } else if (wp == SIZE_MAXIMIZED) {
       pWndContext->pRenderer->ResizeFrame(cx, cy);
-      pWndContext->pUIController->OnResize(cx, cy);
+    } else if(wp == SIZE_RESTORED && !pWndContext->Resizing) {
+      pWndContext->pRenderer->ResizeFrame(cx, cy);
     }
     break;
     // WM_EXITSIZEMOVE is sent when the user grabs the resize bars.
   case WM_ENTERSIZEMOVE:
-    pWndContext->Paused = 0x11;
-    pWndContext->Timer.Stop();
+    pWndContext->pInteractor->SetPaused(true);
+    pWndContext->Resizing = true;
     break;
     // WM_EXITSIZEMOVE is sent when the user releases the resize bars.
     // Here we reset everything based on the new window dimensions.
   case WM_EXITSIZEMOVE:
     RECT rect;
     GetClientRect(hwnd, &rect);
-    pWndContext->Paused = 0x0;
-    pWndContext->Timer.Resume();
+    pWndContext->Resizing = false;
     pWndContext->pRenderer->ResizeFrame(rect.right, rect.bottom);
-    pWndContext->pUIController->OnResize(rect.right, rect.bottom);
+    pWndContext->pInteractor->SetPaused(false);
     break;
     // WM_DESTROY is sent when the window is being destroyed.
   case WM_DESTROY:
@@ -204,47 +249,23 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     ((MINMAXINFO *)lp)->ptMinTrackSize.x = 200;
     ((MINMAXINFO *)lp)->ptMinTrackSize.y = 200;
     return 0;
-
-  case WM_LBUTTONDOWN:
-  case WM_MBUTTONDOWN:
-  case WM_RBUTTONDOWN:
-  case WM_LBUTTONUP:
-  case WM_MBUTTONUP:
-  case WM_RBUTTONUP:
-    pWndContext->pUIController->OnMouseButtonEvent((UI_MOUSE_BUTTON_EVENT)msg, (UI_MOUSE_VIRTUAL_KEY)wp, LOWORD(lp),
-                                                   HIWORD(lp));
-  case WM_MOUSEMOVE:
-    pWndContext->pUIController->OnMouseMove((UI_MOUSE_VIRTUAL_KEY)wp, LOWORD(lp), HIWORD(lp));
-    break;
-  case WM_MOUSEWHEEL:
-    pWndContext->pUIController->OnMouseWheel((UI_MOUSE_VIRTUAL_KEY)GET_KEYSTATE_WPARAM(wp), GET_WHEEL_DELTA_WPARAM(wp),
-                                             LOWORD(lp), HIWORD(lp));
-    break;
-  case WM_IME_KEYDOWN:
-  case WM_KEYDOWN:
-    break;
-  case WM_CHAR:
-    pWndContext->pUIController->OnKeyEvent(0, (unsigned short)wp, LOWORD(lp));
   case WM_KEYUP:
     if (wp == VK_ESCAPE) {
       PostMessage(hwnd, WM_CLOSE, 0, 0);
       return 0;
     }
-    pWndContext->pUIController->OnKeyEvent(1, (unsigned short)wp, 1);
-
-    return 0;
+    break;
   }
 
-  return DefWindowProc(hwnd, msg, wp, lp);
+  LRESULT ret = 0;
+  bool bNoFurtherProcessing = false;
+  if(pWndContext)
+    ret = pWndContext->pInteractor->OnMsgProc(hwnd, msg, wp, lp, &bNoFurtherProcessing);
+
+  if(!bNoFurtherProcessing) {
+    ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
+    ret = DefWindowProc(hwnd, msg, wp, lp);
+  }
+
+  return ret;
 }
-
-void BeginCaptureWindowInput() {
-  POINT pt;
-  HWND hwnd;
-  GetCursorPos(&pt);
-  hwnd = WindowFromPoint(pt);
-
-  SetCapture(hwnd);
-}
-
-void EndCaptureWindowInput() { ReleaseCapture(); }

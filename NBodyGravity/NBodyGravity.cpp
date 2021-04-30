@@ -1,26 +1,27 @@
+#include <windows.h>
 #include "Camera.h"
 #include "D3D12RendererContext.hpp"
 #include "MeshBuffer.h"
 #include "RootSignatureGenerator.h"
 #include "Texture.h"
-#include "UIController.hpp"
 #include "UploadBuffer.h"
 #include "Win32Application.hpp"
 #include "d3dUtils.h"
+#include <DirectXMath.h>
 #include <DirectXColors.h>
 
-static HRESULT CreateNBodyGravityRendererContextAndUI(D3D12RendererContext **ppRenderer,
-                                                      IUIController **ppUIController);
+static HRESULT CreateNBodyGravityRendererContextAndInteractor(D3D12RendererContext **ppRenderer,
+                                                      WindowInteractor **pInteractor);
 
 int main() {
 
   int ret;
   D3D12RendererContext *pRenderer;
-  IUIController *pUIController;
+  WindowInteractor *pInteractor;
 
-  CreateNBodyGravityRendererContextAndUI(&pRenderer, &pUIController);
+  CreateNBodyGravityRendererContextAndInteractor(&pRenderer, &pInteractor);
 
-  ret = RunSample(pRenderer, pUIController, 800, 600, L"D3D12NBodyGravityCS");
+  ret = RunSample(pRenderer, pInteractor, 800, 600, L"D3D12NBodyGravityCS");
   SAFE_DELETE(pRenderer);
   return ret;
 }
@@ -77,7 +78,7 @@ public:
 UploadBuffer FrameResources::ParticleParamCB;
 UploadBuffer FrameResources::DrawParticleCB;
 
-class NBodyGravityApp : public D3D12RendererContext, public IUIController {
+class NBodyGravityApp : public D3D12RendererContext, public WindowInteractor {
 public:
   NBodyGravityApp();
   ~NBodyGravityApp();
@@ -90,10 +91,7 @@ private:
   void OnRenderFrame(float fTime, float fElapsedTime) override;
 
   void OnResizeFrame(int cx, int cy) override;
-  void OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) override;
-  void OnKeyEvent(int downUp, unsigned short key, int repeatCnt) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
 
   HRESULT LoadTexture();
   HRESULT CreateParticleBuffers();
@@ -139,14 +137,14 @@ private:
 
   FLOAT m_fSpread = 400.0f;
 
-  SimpleOrbitCamera m_Camera;
+  CModelViewerCamera m_Camera;
   POINT m_ptLastMousePos;
 };
 
-HRESULT CreateNBodyGravityRendererContextAndUI(D3D12RendererContext **ppRenderer, IUIController **ppUIController) {
+HRESULT CreateNBodyGravityRendererContextAndInteractor(D3D12RendererContext **ppRenderer, WindowInteractor **pInteractor) {
   NBodyGravityApp *pInstance = new NBodyGravityApp;
   *ppRenderer = pInstance;
-  *ppUIController = pInstance;
+  *pInteractor = pInstance;
   return S_OK;
 }
 
@@ -184,8 +182,8 @@ HRESULT NBodyGravityApp::OnInitPipelines() {
 
   PostInitialize();
 
-  m_Camera.SetViewParams({-m_fSpread * 2, m_fSpread * 4, -m_fSpread * 3}, {.0f, .0f, .0f});
-  m_Camera.SetProjMatrix(XM_PIDIV4, GetAspectRatio(), 10.0f, 500000.0f);
+  m_Camera.SetViewParams(XMVectorSet(-m_fSpread * 2, m_fSpread * 4, -m_fSpread * 3, 1.0f), XMVectorSet(.0f, .0f, .0f, 1.0f));
+  m_Camera.SetProjParams(XM_PIDIV4, GetAspectRatio(), 10.0f, 500000.0f);
 
   return hr;
 }
@@ -365,8 +363,8 @@ HRESULT NBodyGravityApp::CreatePSOs() {
   RootSignatureGenerator signatureGen;
 
   signatureGen.AddConstBufferView(0, 0);
-  signatureGen.AddDescriptorTable({RootSignatureGenerator::ComposeShaderResourceViewRange(1, 0)});
-  signatureGen.AddDescriptorTable({RootSignatureGenerator::ComposeUnorderedAccessViewRange(1, 0)});
+  signatureGen.AddDescriptorTable({CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0)});
+  signatureGen.AddDescriptorTable({CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0)});
 
   signatureGen.Generate(m_pd3dDevice, D3D12_ROOT_SIGNATURE_FLAG_NONE, &m_pCSRootSignaure);
 
@@ -377,12 +375,12 @@ HRESULT NBodyGravityApp::CreatePSOs() {
 
   signatureGen.Reset();
   signatureGen.AddConstBufferView(0, 0, D3D12_SHADER_VISIBILITY_GEOMETRY);
-  signatureGen.AddDescriptorTable({RootSignatureGenerator::ComposeShaderResourceViewRange(1, 0)},
+  signatureGen.AddDescriptorTable({CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0)},
                                   D3D12_SHADER_VISIBILITY_VERTEX);
-  signatureGen.AddDescriptorTable({RootSignatureGenerator::ComposeShaderResourceViewRange(1, 1)},
+  signatureGen.AddDescriptorTable({CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1)},
                                   D3D12_SHADER_VISIBILITY_PIXEL);
 
-  signatureGen.AddStaticSamples({RootSignatureGenerator::ComposeStaticSampler(
+  signatureGen.AddStaticSamples({CD3DX12_STATIC_SAMPLER_DESC(
       0, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
       D3D12_TEXTURE_ADDRESS_MODE_CLAMP, .0f, 16)});
 
@@ -509,6 +507,8 @@ void NBodyGravityApp::OnFrameMoved(float fTime, float fElapsedTime) {
 
   FrameResources *pFrameResources;
 
+  m_Camera.FrameMove(fElapsedTime, this);
+
   m_iCurrentFrameIndex = (m_iCurrentFrameIndex + 1) % 3;
   pFrameResources = &m_FrameResources[m_iCurrentFrameIndex];
 
@@ -528,10 +528,10 @@ void NBodyGravityApp::OnFrameMoved(float fTime, float fElapsedTime) {
   DrawPassConstants dpc;
   XMMATRIX M;
 
-  M = XMLoadFloat4x4(&m_Camera.GetViewProj());
+  M = m_Camera.GetViewMatrix() * m_Camera.GetProjMatrix();
   XMStoreFloat4x4(&dpc.ViewProj, XMMatrixTranspose(M));
 
-  M = XMLoadFloat4x4(&m_Camera.GetView());
+  M = m_Camera.GetViewMatrix();
   M = XMMatrixInverse(nullptr, M);
   XMStoreFloat4x4(&dpc.InvView, XMMatrixTranspose(M));
 
@@ -625,60 +625,46 @@ void NBodyGravityApp::OnRenderFrame(float fTime, float fElapsedTime) {
 }
 
 void NBodyGravityApp::OnResizeFrame(int cx, int cy) {
-  m_Camera.SetProjMatrix(XM_PIDIV4, GetAspectRatio(), 10.0f, 500000.0f);
+  m_Camera.SetProjParams(XM_PIDIV4, GetAspectRatio(), 10.0f, 500000.0f);
+  m_Camera.SetWindow(cx, cy);
+  m_Camera.SetButtonMasks(0, MOUSE_WHEEL, MOUSE_LEFT_BUTTON|MOUSE_MIDDLE_BUTTON|MOUSE_RIGHT_BUTTON);
 }
 
-void NBodyGravityApp::OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  switch (ev) {
-  case UI_WM_LBUTTONDOWN:
-    m_ptLastMousePos.x = x;
-    m_ptLastMousePos.y = y;
-    BeginCaptureWindowInput();
-    break;
-  case UI_WM_LBUTTONUP:
-    EndCaptureWindowInput();
-    break;
-  }
-}
+LRESULT NBodyGravityApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
 
-void NBodyGravityApp::OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  if (keys & UI_MK_LBUTTON) {
-    // Make each pixel correspond to a quarter of a degree.
-    float dx = XMConvertToRadians(0.25f * static_cast<float>(x - m_ptLastMousePos.x));
-    float dy = XMConvertToRadians(0.25f * static_cast<float>(y - m_ptLastMousePos.y));
-    m_Camera.Rotate(dx, dy);
-  }
+  LRESULT ret = 0;
 
-  m_ptLastMousePos.x = x;
-  m_ptLastMousePos.y = y;
-}
+  switch (msg) {
+  case WM_KEYDOWN:
+    if (wp == 'R' || wp == 'r') {
+      m_pd3dDirectCmdAlloc->Reset();
+      m_pd3dCommandList->Reset(m_pd3dDirectCmdAlloc, nullptr);
 
-void NBodyGravityApp::OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) {
-  m_Camera.Scale(0.2f * delta, 10.0f, 500000.0f);
-}
+      if (m_iParticleBuffersSwapState) {
+        std::swap(m_pParticleBuffer1, m_pParticleBuffer2);
+        std::swap(m_hParticleSrvBuffer1, m_hParticleSrvBuffer2);
+        std::swap(m_hParticleUavBuffer1, m_hParticleUavBuffer2);
 
-void NBodyGravityApp::OnKeyEvent(int downUp, unsigned short key, int repeatCnt) {
-  if (downUp == 0 && (key == 'R' || key == 'r')) {
-    /// Reset the particle buffers.
+        m_iParticleBuffersSwapState ^= 1;
+      }
 
-    m_pd3dDirectCmdAlloc->Reset();
-    m_pd3dCommandList->Reset(m_pd3dDirectCmdAlloc, nullptr);
+      CreateParticleBuffers();
 
-    if (m_iParticleBuffersSwapState) {
-      std::swap(m_pParticleBuffer1, m_pParticleBuffer2);
-      std::swap(m_hParticleSrvBuffer1, m_hParticleSrvBuffer2);
-      std::swap(m_hParticleUavBuffer1, m_hParticleUavBuffer2);
+      m_pd3dCommandList->Close();
 
-      m_iParticleBuffersSwapState ^= 1;
+      ID3D12CommandList *cmdList[] = {m_pd3dCommandList};
+      m_pd3dCommandQueue->ExecuteCommandLists(1, cmdList);
+
+      FlushCommandQueue();
     }
+    break;
 
-    CreateParticleBuffers();
-
-    m_pd3dCommandList->Close();
-
-    ID3D12CommandList *cmdList[] = {m_pd3dCommandList};
-    m_pd3dCommandQueue->ExecuteCommandLists(1, cmdList);
-
-    FlushCommandQueue();
+  default:
+    break;
   }
+
+  m_Camera.HandleMessages(hwnd, msg, wp, lp);
+
+  return ret;
 }
+

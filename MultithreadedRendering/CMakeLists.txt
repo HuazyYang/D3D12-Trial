@@ -1,7 +1,7 @@
-project(LoadModel)
+project(MultithreadedRendering)
 
 set(${PROJECT_NAME}_src_files
-  LoadModel.cpp
+  MultithreadedRendering.cpp
 )
 
 file(GLOB ${PROJECT_NAME}_shader_files Shaders/*.hlsl)

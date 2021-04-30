@@ -5,7 +5,13 @@ set(pch_files
 )
 
 set(src_files
+  SDKmesh.cpp
+  SDKmesh.h
+  DXUTmisc.cpp
+  DXUTmisc.h
   pch.cpp
+  HpFileIo.cpp
+  HpFileIo.h
   SyncFence.cpp
   SyncFence.hpp
   ResourceUploadBatch.cpp
@@ -19,7 +25,6 @@ set(src_files
   DescriptorHeapAllocator.cpp
   Common.cpp
   Common.h
-  GameTimer.cpp
   MeshBuffer.cpp
   RootSignatureGenerator.cpp
   Texture.cpp
@@ -28,7 +33,6 @@ set(src_files
   d3dUtils.h
   d3dx12.h
   DescriptorHeapAllocator.h
-  GameTimer.hpp
   GeometryGenerator.h
   MeshBuffer.h
   RootSignatureGenerator.h
@@ -36,7 +40,6 @@ set(src_files
   UploadBuffer.h
   Win32Application.cpp
   Win32Application.hpp
-  UIController.hpp
 )
 
 set(D3D12MemoryAllocatorSrc

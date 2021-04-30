@@ -1,5 +1,13 @@
 #pragma once
 #include "d3dUtils.h"
+#include <vector>
+
+class UploadBufferPool {
+public:
+
+private:
+    std::vector<ID3D12Resource> m_aUploadBuffers;
+};
 
 class UploadBuffer
 {

@@ -36,5 +36,4 @@ float4 PSMain(VS_OUTPUT i): SV_TARGET {
 
   float4 color = DiffuseMap.Sample(BilinearSampler, i.Texcoord);
   return float4(color.xyz, 1.0);
-  //return float4(1.0, .0, .0, 1.0);
 }

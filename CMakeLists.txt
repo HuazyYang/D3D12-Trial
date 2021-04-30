@@ -71,16 +71,18 @@ link_directories(
   ${THIRD_PARTY_DIR}/dxc/lib/x64 ${ASSIMP_LIBRARY_DIRS}
 )
 
-add_compile_definitions("UNICODE" "_UNICODE")
+add_compile_definitions("UNICODE" "_UNICODE" "_WIN32_WINNT=0xA00" "WINVER=0xA00")
+add_compile_definitions("WIN32_LEAN_AND_MEAN")
 
 add_link_options("/NODEFAULTLIB:libcmt.lib")
 
 add_subdirectory(Common)
 # add_subdirectory(D3DTutorial)
-# add_subdirectory(NBodyGravity)
+add_subdirectory(NBodyGravity)
 # add_subdirectory(HDRToneMappingCS)
 # add_subdirectory(HelloDXR)
 add_subdirectory(LoadModel)
+add_subdirectory(MultithreadedRendering)
 
 set(CPACK_PROJECT_NAME ${PROJECT_NAME})
 set(CPACK_PROJECT_VERSION ${PROJECT_VERSION})

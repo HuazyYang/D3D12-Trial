@@ -106,18 +106,19 @@ inline ptrdiff_t AlignDown(ptrdiff_t ptr, size_t alignment) {
 
 struct Unknown12
 {
-    Unknown12();
-    virtual ~Unknown12();
-    ULONG AddRef();
-    ULONG Release();
+  ULONG AddRef();
+  ULONG Release();
 
+protected:
+  Unknown12();
+  virtual ~Unknown12();
 private:
-    Unknown12(const Unknown12 &) = delete;
-    Unknown12(Unknown12 &&) = delete;
-    Unknown12 &operator= (const Unknown12 &) = delete;
-    Unknown12 &operator= (Unknown12&&) = delete;
+  Unknown12(const Unknown12 &) = delete;
+  Unknown12(Unknown12 &&) = delete;
+  Unknown12 &operator= (const Unknown12 &) = delete;
+  Unknown12 &operator= (Unknown12&&) = delete;
 
-    volatile ULONG m_uRefcnt;
+  volatile ULONG m_uRefcnt;
 };
 
 struct NonCopyable {
@@ -127,15 +128,6 @@ struct NonCopyable {
   NonCopyable operator = (const NonCopyable &) = delete;
   NonCopyable& operator = (NonCopyable &&) = delete;
 };
-
-template<typename Ty, typename ...TArgs>
-void reconstruct_inplace(void *p, TArgs ...args) {
-  reinterpret_cast<Ty *>(p)->~Ty();
-#pragma push_macro("new")
-#undef new
-  :new(p)Ty(args...);
-#pragma pop_macro("new")
-}
 
 namespace d3dUtils {
 

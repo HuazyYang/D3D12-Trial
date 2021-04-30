@@ -6,7 +6,7 @@
 #undef min
 #undef max
 
-#define _ALIGN_UP(ptr, alignment)                                                                                      \
+#define _ALIGN_UP(ptr, alignment)  \
   (ULONG_PTR)(((ULONG_PTR)(ptr) + (ULONG_PTR)(alignment)-1) & ~((ULONG_PTR)(alignment)-1))
 #define _ALIGN_DOWN(ptr, alignment) (ULONG_PTR)((ULONG_PTR)(ptr) & ~((ULONG_PTR)(alignment)-1))
 
@@ -17,6 +17,7 @@ namespace HpFileIo {
 enum IO_RESULT_TYPE
 {
   IO_RESULT_TYPE_NONE,
+  IO_RESULT_TYPE_HEAP,
   IO_RESULT_TYPE_MAPPING,
   IO_RESULT_TYPE_DIRECT_IO
 };
@@ -26,20 +27,39 @@ struct FileDataBlobImpl: public IFileDataBlob {
   static FileDataBlobImpl *Create() {
     return new FileDataBlobImpl;
   }
+  static FileDataBlobImpl *CreateFromInplaceHeap(size_t heapSize) {
+    const size_t alignment = sizeof(void *);
+    size_t mempos = reinterpret_cast<size_t>(new BYTE[sizeof(FileDataBlobImpl) + heapSize + alignment - 1 + sizeof(void *)]);
+    size_t buffpos = (mempos + sizeof(void *) + alignment - 1) & ~(alignment - 1);
+    void **pbuffpos = reinterpret_cast<void **>(buffpos);
+    pbuffpos[-1] = reinterpret_cast<void *>(mempos);
+
+    FileDataBlobImpl *pHeader = reinterpret_cast<FileDataBlobImpl *>(buffpos);
+    ::new(pHeader)FileDataBlobImpl();
+    pHeader->IoType = IO_RESULT_TYPE_HEAP;
+    pHeader->Data = (BYTE *)pHeader + sizeof(FileDataBlobImpl);
+    pHeader->Size = heapSize;
+    pHeader->Heap.pHeap = pHeader;
+    return pHeader;
+  }
 
   ULONG Release() override {
     LONG refcnt = InterlockedDecrement(&Refcnt);
     if (refcnt == 0) {
       switch (IoType) {
+      case IO_RESULT_TYPE_HEAP:
+        this->~FileDataBlobImpl();
+        delete [](static_cast<BYTE *>(static_cast<void **>(this->Heap.pHeap)[-1]));
+        break;
       case IO_RESULT_TYPE_MAPPING:
         CloseHandle(Mapped.hFileMapping);
+        delete this;
         break;
       case IO_RESULT_TYPE_DIRECT_IO:
         VirtualFree(Pages.pAlloc, 0, MEM_FREE);
+        delete this;
         break;
       }
-
-      delete this;
     }
     return refcnt;
   }
@@ -53,7 +73,7 @@ struct FileDataBlobImpl: public IFileDataBlob {
     return Size;
   }
 
-  ULONG Refcnt;
+  volatile ULONG Refcnt;
   IO_RESULT_TYPE IoType;
   void *Data;
   size_t Size;
@@ -65,6 +85,9 @@ struct FileDataBlobImpl: public IFileDataBlob {
     struct {
       VOID *pAlloc;
     } Pages;
+    struct {
+      VOID *pHeap;
+    } Heap;
   };
 
 private:
@@ -135,6 +158,44 @@ HRESULT _MapFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iRe
   return S_OK;
 }
 
+HRESULT __ReadFileBuffering(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iReqSizeInBytes,
+                           IFileDataBlob **ppResult) {
+
+  HRESULT hr = S_OK;
+  HANDLE hFile;
+  LARGE_INTEGER startOffset, endOffset;
+  FileDataBlobImpl *pResult;
+  DWORD bytesToRead, bytesXfer;
+  BYTE *pBuffer;
+
+  hFile = CreateFileW(pFileName, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING,
+                      FILE_FLAG_SEQUENTIAL_SCAN,
+                      NULL);
+  if (hFile == INVALID_HANDLE_VALUE)
+    return HRESULT_FROM_WIN32(GetLastError());
+
+  startOffset.QuadPart = iOffsetInBytes;
+  endOffset.QuadPart = iOffsetInBytes + (ptrdiff_t)iReqSizeInBytes;
+
+  pResult = FileDataBlobImpl::CreateFromInplaceHeap(iReqSizeInBytes);
+  pBuffer = reinterpret_cast<BYTE *>(pResult->Data);
+
+  while(startOffset.QuadPart < endOffset.QuadPart) {
+    bytesToRead = (DWORD)std::min((ULONGLONG)(endOffset.QuadPart - startOffset.QuadPart), (ULONGLONG)(DWORD)(-1));
+    if(!ReadFile(hFile, pBuffer, bytesToRead, &bytesXfer, NULL)) {
+      CloseHandle(hFile);
+      pResult->Release();
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+    startOffset.QuadPart += bytesXfer;
+    pBuffer += bytesXfer;
+  }
+
+  *ppResult = pResult;
+  CloseHandle(hFile);
+  return hr;
+}
+
 HRESULT _ReadFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iReqSizeInBytes,
                           IFileDataBlob **ppResult) {
   HRESULT hr = S_OK;
@@ -175,16 +236,6 @@ HRESULT _ReadFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iR
     return E_FAIL;
   }
 
-#if _DIRECTIO_NO_BUFFERING
-  startOffset.QuadPart = _ALIGN_DOWN(iOffsetInBytes, sysInfo.dwPageSize);
-  if (iReqSizeInBytes) {
-    endOffset.QuadPart = _ALIGN_UP(iOffsetInBytes + (ptrdiff_t)iReqSizeInBytes, sysInfo.dwPageSize);
-  } else {
-    endOffset.QuadPart = fileSize;
-    iReqSizeInBytes    = endOffset.QuadPart - iOffsetInBytes;
-    endOffset.QuadPart = _ALIGN_UP(endOffset.QuadPart, sysInfo.dwPageSize);
-  }
-#else
   startOffset.QuadPart = iOffsetInBytes;
   if (iReqSizeInBytes) {
     endOffset.QuadPart = iOffsetInBytes + (ptrdiff_t)iReqSizeInBytes;
@@ -192,6 +243,16 @@ HRESULT _ReadFileDirectly(LPCWSTR pFileName, ptrdiff_t iOffsetInBytes, size_t iR
     endOffset.QuadPart = fileSize;
     iReqSizeInBytes = endOffset.QuadPart - iOffsetInBytes;
   }
+
+  // For samll file block, just read it using system buffering.
+  if(iReqSizeInBytes < (size_t)(4 * blockSize)) {
+    CloseHandle(hFile);
+    return __ReadFileBuffering(pFileName, iOffsetInBytes, iReqSizeInBytes, ppResult);
+  }
+
+#if _DIRECTIO_NO_BUFFERING
+  startOffset.QuadPart = _ALIGN_DOWN(iOffsetInBytes, sysInfo.dwPageSize);
+  endOffset.QuadPart = _ALIGN_UP(iOffsetInBytes + (ptrdiff_t)iReqSizeInBytes, sysInfo.dwPageSize);
 #endif
 
   reqSize.QuadPart = _ALIGN_UP(endOffset.QuadPart - startOffset.QuadPart, sysInfo.dwPageSize);
@@ -305,8 +366,8 @@ HRESULT ReadFileDirectly(_In_ const wchar_t *pFileName, _In_ ptrdiff_t iOffsetIn
   if (ppResult == nullptr)
     return E_INVALIDARG;
 
-  hr = _MapFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
-  if (FAILED(hr))
+  // hr = _MapFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
+  // if (FAILED(hr))
     hr = _ReadFileDirectly(pFileName, iOffsetInBytes, iRequestSizeInBytes, ppResult);
   return hr;
 }

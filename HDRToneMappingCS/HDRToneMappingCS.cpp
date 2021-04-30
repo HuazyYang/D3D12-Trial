@@ -1,8 +1,8 @@
+#include <windows.h>
 #include "Camera.h"
 #include "D3D12RendererContext.hpp"
 #include "MeshBuffer.h"
 #include "Texture.h"
-#include "UIController.hpp"
 #include "UploadBuffer.h"
 #include "Win32Application.hpp"
 #include "d3dx12.h"
@@ -11,15 +11,15 @@
 using namespace DirectX;
 using namespace Microsoft::WRL;
 
-static void CreateAppInstance(D3D12RendererContext **ppRenderer, IUIController **ppUIController);
+static void CreateAppInstance(D3D12RendererContext **ppRenderer, WindowInteractor **pInteractor);
 
 int main() {
   int ret;
   D3D12RendererContext *pRenderer;
-  IUIController *pUIController;
+  WindowInteractor *pInteractor;
 
-  CreateAppInstance(&pRenderer, &pUIController);
-  ret = RunSample(pRenderer, pUIController, 800, 600, L"HDRToneMappingCS");
+  CreateAppInstance(&pRenderer, &pInteractor);
+  ret = RunSample(pRenderer, pInteractor, 800, 600, L"HDRToneMappingCS");
   SAFE_DELETE(pRenderer);
   return ret;
 }

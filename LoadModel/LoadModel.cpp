@@ -1,26 +1,28 @@
-#include "Model.hpp"
+#include <windows.h>
 #include <Camera.h>
 #include <D3D12RendererContext.hpp>
 #include <DirectXColors.h>
 #include <RootSignatureGenerator.h>
-#include <UIController.hpp>
 #include <UploadBuffer.h>
 #include <Win32Application.hpp>
+#include <DirectXMath.h>
+#include <ResourceUploadBatch.hpp>
+#include <SDKmesh.h>
 
 using Microsoft::WRL::ComPtr;
 using namespace DirectX;
 
-HRESULT CreateRendererAndUIInstance(D3D12RendererContext **ppRenderer, IUIController **ppUIController);
+HRESULT CreateRendererAndInteractor(D3D12RendererContext **ppRenderer, WindowInteractor **pInteractor);
 
 int main() {
 
   HRESULT hr;
   int ret;
   D3D12RendererContext *pRenderer;
-  IUIController *pUIController;
+  WindowInteractor *pInteractor;
 
-  V_RETURN(CreateRendererAndUIInstance(&pRenderer, &pUIController));
-  ret = RunSample(pRenderer, pUIController, 800, 600, L"Load Model for D3D12");
+  V_RETURN(CreateRendererAndInteractor(&pRenderer, &pInteractor));
+  ret = RunSample(pRenderer, pInteractor, 800, 600, L"Load Model for D3D12");
 
   SAFE_DELETE(pRenderer);
 
@@ -61,7 +63,7 @@ public:
 
 UploadBuffer FrameResources::PassCBs;
 
-class LoadModelSample : public D3D12RendererContext, public IUIController {
+class LoadModelSample : public D3D12RendererContext, public WindowInteractor {
 public:
   LoadModelSample();
 
@@ -73,29 +75,26 @@ public:
   void OnRenderFrame(float fTime, float fElapedTime) override;
 
 private:
-  void OnKeyEvent(int downUp, unsigned short key, int repeatCnt) override;
-  void OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
 
   HRESULT LoadModel();
   HRESULT CreatePSOs();
-  HRESULT CreateDescriptorHeap();
 
-  Model m_Model;
+  CDXUTSDKMesh m_Model;
   std::vector<ComPtr<ID3D12PipelineState>> m_aPSOs;
   ComPtr<ID3D12RootSignature> m_pRootSignature;
   ComPtr<ID3D12DescriptorHeap> m_pModelDescriptorHeap;
   FrameResources m_aFrameResources[3];
   int m_iCurrentFrameIndex = 0;
-  Camera m_Camera;
+  CFirstPersonCamera m_Camera;
 
   XMINT2 m_ptLastMousePos;
 };
 
-HRESULT CreateRendererAndUIInstance(D3D12RendererContext **ppRenderer, IUIController **ppUIController) {
+HRESULT CreateRendererAndInteractor(D3D12RendererContext **ppRenderer, WindowInteractor **pInteractor) {
   LoadModelSample *pInstance = new LoadModelSample();
   *ppRenderer = pInstance;
-  *ppUIController = pInstance;
+  *pInteractor = pInstance;
   return S_OK;
 }
 
@@ -121,14 +120,22 @@ HRESULT LoadModelSample::OnInitPipelines() {
 
   V_RETURN(LoadModel());
   V_RETURN(CreatePSOs());
-  V_RETURN(CreateDescriptorHeap());
 
   for (auto &frameRes : m_aFrameResources) {
     frameRes.CreateCommandAllocator(m_pd3dDevice);
   }
   FrameResources::CreateBuffers(m_pd3dDevice, 3);
 
-  m_Camera.SetViewParams(XMFLOAT3(100.0f, 5.0f, 5.0f), XMFLOAT3(.0f, .0f, .0f));
+  XMFLOAT3 vMin = XMFLOAT3(-1000.0f, -1000.0f, -1000.0f);
+  XMFLOAT3 vMax = XMFLOAT3(1000.0f, 1000.0f, 1000.0f);
+
+  m_Camera.SetViewParams(XMVectorSet(100.0f, 5.0f, 5.0f, 0.f), g_XMZero);
+  m_Camera.SetRotateButtons(TRUE, FALSE, FALSE);
+  m_Camera.SetScalers(0.01f, 10.0f);
+  m_Camera.SetDrag(true);
+  m_Camera.SetEnableYAxisMovement(true);
+  m_Camera.SetClipToBoundary(TRUE, &vMin, &vMax);
+  m_Camera.FrameMove(0, this);
 
   return hr;
 }
@@ -139,25 +146,31 @@ HRESULT LoadModelSample::CreatePSOs() {
   ComPtr<ID3DBlob> pVSBuffer, pPSBuffer;
   ComPtr<ID3DBlob> pErrorBuffer;
 
-  V_RETURN(d3dUtils::CompileShaderFromFile(L"Shaders/basic.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0,
+  V(d3dUtils::CompileShaderFromFile(L"Shaders/basic.hlsl", nullptr, nullptr, "VSMain", "vs_5_0", 0, 0,
                                            &pVSBuffer, &pErrorBuffer));
-  if (pErrorBuffer) {
-    DX_TRACE(L"Compile VS error: %S\n", pErrorBuffer->GetBufferPointer());
-    V_RETURN(E_FAIL);
+  if (FAILED(hr)) {
+    DX_TRACE(L"Compile VS error: %S\n", pErrorBuffer ? pErrorBuffer->GetBufferPointer() : "Unknown");
+    return hr;
+  } else if(pErrorBuffer) {
+    DX_TRACE(L"Compil VS warning: %S\n", pErrorBuffer->GetBufferPointer());
+    pErrorBuffer = nullptr;
   }
 
-  V_RETURN(d3dUtils::CompileShaderFromFile(L"Shaders/basic.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", 0, 0,
+  V(d3dUtils::CompileShaderFromFile(L"Shaders/basic.hlsl", nullptr, nullptr, "PSMain", "ps_5_0", 0, 0,
                                            &pPSBuffer, &pErrorBuffer));
-  if (pErrorBuffer) {
-    DX_TRACE(L"Compile VS error: %S\n", pErrorBuffer->GetBufferPointer());
-    V_RETURN(E_FAIL);
+  if (FAILED(hr)) {
+    DX_TRACE(L"Compile PS error: %S\n", pErrorBuffer ? pErrorBuffer->GetBufferPointer() : "Unknown");
+    return hr;
+  } else if(pErrorBuffer) {
+    DX_TRACE(L"Compil PS warning: %S\n", pErrorBuffer->GetBufferPointer());
+    pErrorBuffer = nullptr;
   }
 
   RootSignatureGenerator rsGen;
   rsGen.AddConstBufferView(0);
-  rsGen.AddDescriptorTable({RootSignatureGenerator::ComposeDesciptorRange(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0)},
+  rsGen.AddDescriptorTable({CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0)},
                            D3D12_SHADER_VISIBILITY_PIXEL);
-  rsGen.AddStaticSamples({RootSignatureGenerator::ComposeStaticSampler(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR)});
+  rsGen.AddStaticSamples({CD3DX12_STATIC_SAMPLER_DESC(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR)});
 
   rsGen.Generate(m_pd3dDevice, D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT, &m_pRootSignature);
 
@@ -175,8 +188,6 @@ HRESULT LoadModelSample::CreatePSOs() {
   psoDesc.SampleDesc = GetMsaaSampleDesc();
   psoDesc.SampleMask = UINT_MAX;
 
-  m_aPSOs.reserve(m_Model.inputLayouts.size());
-
   D3D12_INPUT_ELEMENT_DESC inputLayout[] = {
       {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
       {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
@@ -193,32 +204,6 @@ HRESULT LoadModelSample::CreatePSOs() {
   return hr;
 }
 
-HRESULT LoadModelSample::CreateDescriptorHeap() {
-
-  HRESULT hr;
-  D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-  heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-  heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-  heapDesc.NumDescriptors = m_Model.texturesCache.size();
-
-  V_RETURN(m_pd3dDevice->CreateDescriptorHeap(&heapDesc, IID_PPV_ARGS(&m_pModelDescriptorHeap)));
-
-  CD3DX12_CPU_DESCRIPTOR_HANDLE cpuHandle;
-  cpuHandle = m_pModelDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-
-  for (auto &texCache : m_Model.texturesCache) {
-
-    cpuHandle = m_pModelDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-    cpuHandle.Offset(texCache.descriptorIndex, m_uCbvSrvUavDescriptorSize);
-
-    if (texCache.defaultBuffer) {
-      m_pd3dDevice->CreateShaderResourceView(texCache.defaultBuffer.Get(), nullptr, cpuHandle);
-    }
-  }
-
-  return hr;
-}
-
 HRESULT LoadModelSample::LoadModel() {
   HRESULT hr;
 
@@ -226,8 +211,9 @@ HRESULT LoadModelSample::LoadModel() {
 
   uploadBatch.Begin(D3D12_COMMAND_LIST_TYPE_DIRECT);
 
-  V_RETURN(m_Model.CreateFromSDKMESH(
-      &uploadBatch, LR"(D:\repos\directx-sdk-samples\Media\powerplant\\powerplant.sdkmesh)", ModelLoader_Default));
+  m_Model.Create(&uploadBatch, LR"(directx-sdk-samples\Media\powerplant\\powerplant.sdkmesh)");
+
+  m_Model.GetResourceDescriptorHeap(m_pd3dDevice, &m_pModelDescriptorHeap);
 
   std::future<HRESULT> batchWaitable;
 
@@ -239,20 +225,22 @@ HRESULT LoadModelSample::LoadModel() {
 }
 
 void LoadModelSample::OnResizeFrame(int cx, int cy) {
-  m_Camera.SetProjMatrix(XM_PIDIV4, GetAspectRatio(), 1.0f, 10000.f);
+  m_Camera.SetProjParams(XM_PIDIV4, GetAspectRatio(), 0.1f, 100000.0f);
 }
 
 void LoadModelSample::OnFrameMoved(float fTime, float fElapsedTime) {
+
+  m_Camera.FrameMove(fElapsedTime, this);
 
   m_iCurrentFrameIndex = (m_iCurrentFrameIndex + 1) % 3;
   auto pFrameResource = &m_aFrameResources[m_iCurrentFrameIndex];
 
   m_pSyncFence->WaitForSyncPoint(pFrameResource->FencePoint);
 
-  XMMATRIX VP = m_Camera.GetViewProj();
+  XMMATRIX VP = m_Camera.GetViewMatrix() * m_Camera.GetProjMatrix();
   PassConstants pc;
   XMStoreFloat4x4(&pc.ViewProj, XMMatrixTranspose(VP));
-  pc.EyePosW = m_Camera.GetEyePosW();
+  XMStoreFloat3(&pc.EyePosW, m_Camera.GetEyePt());
   FrameResources::PassCBs.CopyData(&pc, sizeof(pc), m_iCurrentFrameIndex);
 }
 
@@ -281,40 +269,8 @@ void LoadModelSample::OnRenderFrame(float fTime, float fElapsedTime) {
   m_pd3dCommandList->SetPipelineState(m_aPSOs[0].Get());
   m_pd3dCommandList->SetDescriptorHeaps(1, m_pModelDescriptorHeap.GetAddressOf());
 
-  for (auto &mesh : m_Model.meshes) {
-    if (mesh->opaqueMeshParts.empty())
-      continue;
-
-    D3D12_VERTEX_BUFFER_VIEW vbv;
-    D3D12_INDEX_BUFFER_VIEW ibv;
-
-    for (auto &part : mesh->opaqueMeshParts) {
-
-      vbv.BufferLocation = part->staticVertexBuffer->GetGPUVirtualAddress();
-      vbv.SizeInBytes = part->vertexBufferSize;
-      vbv.StrideInBytes = part->vertexStride;
-
-      ibv.BufferLocation = part->staticIndexBuffer->GetGPUVirtualAddress();
-      ibv.Format = part->indexFormat;
-      ibv.SizeInBytes = part->indexBufferSize;
-
-      m_pd3dCommandList->IASetPrimitiveTopology(part->primitiveType);
-      m_pd3dCommandList->IASetVertexBuffers(0, 1, &vbv);
-      m_pd3dCommandList->IASetIndexBuffer(&ibv);
-
-      m_pd3dCommandList->SetGraphicsRootConstantBufferView(
-          0, FrameResources::PassCBs.GetConstBufferAddress(m_iCurrentFrameIndex));
-
-      auto &mat = m_Model.materials[part->materialIndex];
-      CD3DX12_GPU_DESCRIPTOR_HANDLE diffHandle;
-      diffHandle = m_pModelDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-      diffHandle.Offset(mat.diffuseTextureIndex, m_uCbvSrvUavDescriptorSize);
-
-      m_pd3dCommandList->SetGraphicsRootDescriptorTable(1, diffHandle);
-
-      m_pd3dCommandList->DrawIndexedInstanced(part->indexCount, 1, 0, 0, 0);
-    }
-  }
+  m_pd3dCommandList->SetGraphicsRootConstantBufferView(0, FrameResources::PassCBs.GetConstBufferAddress(m_iCurrentFrameIndex));
+  m_Model.Render(m_pd3dCommandList, m_pModelDescriptorHeap.Get(), 1, INVALID_SAMPLER_SLOT, INVALID_SAMPLER_SLOT);
 
   m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
                                                                               D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -328,55 +284,11 @@ void LoadModelSample::OnRenderFrame(float fTime, float fElapsedTime) {
   Present();
 }
 
-void LoadModelSample::OnKeyEvent(int downUp, unsigned short key, int repeatCnt) {
-  float dt = 0.001f;
-  switch (key) {
-  case 'w':
-  case 'W':
-    m_Camera.Walk(10.0f * dt);
-    break;
-  case 'S':
-  case 's':
-    m_Camera.Walk(-10.0f * dt);
-    break;
-  case 'A':
-  case 'a':
-    m_Camera.Strafe(-10.0f * dt);
-    break;
-  case 'D':
-  case 'd':
-    m_Camera.Strafe(10.0f * dt);
-    break;
-  }
+LRESULT LoadModelSample::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
 
-  m_Camera.UpdateViewMatrix();
-}
+  LRESULT ret = 0;
 
-void LoadModelSample::OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  switch (ev) {
-  case UI_WM_LBUTTONDOWN:
-  case UI_WM_RBUTTONDOWN:
-    m_ptLastMousePos.x = x;
-    m_ptLastMousePos.y = y;
-    BeginCaptureWindowInput();
-    break;
-  case WM_LBUTTONUP:
-  case WM_RBUTTONUP:
-    EndCaptureWindowInput();
-    break;
-  }
-}
+  m_Camera.HandleMessages(hwnd, msg, wp, lp);
 
-void LoadModelSample::OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  // Make each pixel correspond to a quarter of a degree.
-  if (keys & UI_MK_LBUTTON) {
-    float dx = XMConvertToRadians(0.25f * static_cast<float>(x - m_ptLastMousePos.x));
-    float dy = XMConvertToRadians(0.25f * static_cast<float>(y - m_ptLastMousePos.y));
-
-    m_Camera.Pitch(dy);
-    m_Camera.RotateY(dx);
-    m_Camera.UpdateViewMatrix();
-  }
-  m_ptLastMousePos.x = x;
-  m_ptLastMousePos.y = y;
+  return ret;
 }

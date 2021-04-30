@@ -71,7 +71,7 @@ HRESULT WINAPI DXTraceW(_In_z_ const WCHAR* strFile, _In_ DWORD dwLine, _In_ HRE
 
 void DXOutputDebugStringA(LPCSTR fmt, ...) {
     va_list ap;
-    CHAR buff[256];
+    CHAR buff[512];
     CHAR *pb;
     int cch, cchRet;
 
@@ -80,8 +80,10 @@ void DXOutputDebugStringA(LPCSTR fmt, ...) {
     cch = _countof(buff);
     do {
         cchRet = vsnprintf(pb, cch, fmt, ap);
-        if (cchRet >= cch) {
-            cch = cchRet + 1;
+        if (cchRet < 0 || cchRet >= cch) {
+            if(pb != buff)
+                delete []pb;
+            cch <<= 1;
             pb = new CHAR[cch];
         } else
             break;
@@ -96,7 +98,7 @@ void DXOutputDebugStringA(LPCSTR fmt, ...) {
 
 void DXOutputDebugStringW(LPCWSTR fmt, ...) {
     va_list ap;
-    WCHAR buff[256];
+    WCHAR buff[512];
     WCHAR *pb;
     int cch, cchRet;
 
@@ -104,9 +106,11 @@ void DXOutputDebugStringW(LPCWSTR fmt, ...) {
     pb = buff;
     cch = _countof(buff);
     do {
-        cchRet = vswprintf_s(pb, cch, fmt, ap);
-        if (cchRet >= cch) {
-            cch = cchRet + 1;
+        cchRet = vswprintf(pb, cch, fmt, ap);
+        if (cchRet < 0 || cchRet >= cch) {
+            if(pb != buff)
+                delete []pb;
+            cch <<= 1;
             pb = new WCHAR[cch];
         } else
             break;
