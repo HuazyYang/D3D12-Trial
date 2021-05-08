@@ -45,7 +45,7 @@ set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex/DirectXTex)
 set(D3D12MEMORYALLOCATOR_SOURCE_DIR ${THIRD_PARTY_DIR}/D3D12MemoryAllocator/src)
 set(ASSIMP_INCLUDE_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/include)
 set(ASSIMP_CONFIG_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/build/include)
-
+set(IMGUI_SOURCE_DIR ${THIRD_PARTY_DIR}/imgui) # For ImGui
 
 set(HLSL_SHADER_MODEL_VERSION 6_0)
 set(DXC_BINARY_DIR ${THIRD_PARTY_DIR}/dxc/bin/x64) # DXC binary path
@@ -58,17 +58,24 @@ include_directories(
   ${COMMON_SOURCE_DIR}
   ${THIRD_PARTY_DIR}/dxc/inc # dxc headers
   ${ASSIMP_INCLUDE_DIRS}
+
+  ${IMGUI_SOURCE_DIR}
+  ${IMGUI_SOURCE_DIR}/backends
 )
+
+add_compile_options("/fp:fast")
 
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug" OR ${CMAKE_BUILD_TYPE} STREQUAL "RelWithDebInfo")
 add_compile_definitions("_DEBUG" "DEBUG")
 else()
-add_compile_definitions("NDEBUG")
+# add_compile_definitions("NDEBUG")
+# add_compile_options("/Zi")
+# add_link_options("/DEBUG")
 endif()
 
 link_directories(
   ${THIRD_PARTY_DIR}/DirectXTex/build/bin/CMake/${TRIAL_OUTDIR_END_SUFFIX}
-  ${THIRD_PARTY_DIR}/dxc/lib/x64 ${ASSIMP_LIBRARY_DIRS}
+  ${THIRD_PARTY_DIR}/dxc/lib/x64 ${TRIAL_OUTDIR_END_SUFFIX}
 )
 
 add_compile_definitions("UNICODE" "_UNICODE" "_WIN32_WINNT=0xA00" "WINVER=0xA00")

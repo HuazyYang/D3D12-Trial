@@ -396,14 +396,14 @@ protected:
     void RenderMesh( _In_ UINT iMesh,
                      _In_ bool bAdjacent,
                      _In_ ID3D12GraphicsCommandList* pd3dCommandList,
-                     _In_ ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                     _In_ D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                      _In_ UINT iDiffuseSlot,
                      _In_ UINT iNormalSlot,
                      _In_ UINT iSpecularSlot );
     void RenderFrame( _In_ UINT iFrame,
                       _In_ bool bAdjacent,
                       _In_ ID3D12GraphicsCommandList* pd3dCommandList,
-                      _In_ ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                      _In_ D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                       _In_ UINT iDiffuseSlot,
                       _In_ UINT iNormalSlot,
                       _In_ UINT iSpecularSlot );
@@ -417,7 +417,7 @@ public:
                             _In_opt_ SDKMESH_CALLBACKS12* pLoaderCallbacks = nullptr );
     // When you not provide SDKMESH_CALLBACK12, you must call this to reclare the resource view descriptor heap, or you
     // can not bind to the correct descriptor heap(s).
-    HRESULT GetResourceDescriptorHeap(_In_ ID3D12Device* pDev12, _Out_ ID3D12DescriptorHeap **ppHeap) const;
+    HRESULT GetResourceDescriptorHeap(_In_ ID3D12Device* pDev12, BOOL bShaderVisible, _Out_ ID3D12DescriptorHeap **ppHeap) const;
     virtual HRESULT LoadAnimation( _In_z_ const WCHAR* szFileName );
     virtual void Destroy();
 
@@ -427,12 +427,12 @@ public:
 
     //Direct3D 12 Rendering
     virtual void Render( _In_ ID3D12GraphicsCommandList* pd3dCommandList,
-                         _In_ ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                         _In_ D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                          _In_ UINT iDiffuseSlot = INVALID_SAMPLER_SLOT,
                          _In_ UINT iNormalSlot = INVALID_SAMPLER_SLOT,
                          _In_ UINT iSpecularSlot = INVALID_SAMPLER_SLOT );
     virtual void RenderAdjacent( _In_ ID3D12GraphicsCommandList* pd3dCommandList,
-                                 _In_ ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                                 _In_ D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                                  _In_ UINT iDiffuseSlot = INVALID_SAMPLER_SLOT,
                                  _In_ UINT iNormalSlot = INVALID_SAMPLER_SLOT,
                                  _In_ UINT iSpecularSlot = INVALID_SAMPLER_SLOT );

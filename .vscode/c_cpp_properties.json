@@ -5,7 +5,9 @@
             "includePath": [
                 "./Common",
                 "../ThirdParty/DirectXTex/DirectXTex",
-                "../ThirdParty/D3D12MemoryAllocator/src"
+                "../ThirdParty/D3D12MemoryAllocator/src",
+                "../ThirdParty/imgui",
+                "../ThirdParty/imgui/backends"
             ],
             "defines": [
                 "_DEBUG",

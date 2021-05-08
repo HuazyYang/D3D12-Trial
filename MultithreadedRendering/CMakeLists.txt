@@ -13,7 +13,6 @@ add_executable(
 target_link_libraries(
   ${PROJECT_NAME}
   Common
-  DirectXTex
 )
 
 copy_assets(${PROJECT_NAME}_shader_files "Shaders" copied_${PROJECT_NAME}_shader_files)

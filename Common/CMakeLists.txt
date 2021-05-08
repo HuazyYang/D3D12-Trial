@@ -56,22 +56,21 @@ DXRHelpers/ShaderBindingTableGenerator.cpp
 DXRHelpers/ShaderBindingTableGenerator.h
 )
 
-include_directories(${THIRD_PARTY_DIR}/imgui)
 set(imgui_src_files
-  ${THIRD_PARTY_DIR}/imgui/imgui.cpp
-  ${THIRD_PARTY_DIR}/imgui/imgui_draw.cpp
-  ${THIRD_PARTY_DIR}/imgui/backends/imgui_impl_dx12.cpp
-  ${THIRD_PARTY_DIR}/imgui/backends/imgui_impl_win32.cpp
-  ${THIRD_PARTY_DIR}/imgui/imgui_widgets.cpp
-  ${THIRD_PARTY_DIR}/imgui/imgui_tables.cpp
-  ${THIRD_PARTY_DIR}/imgui/imconfig.h
-  ${THIRD_PARTY_DIR}/imgui/imgui.h
-  ${THIRD_PARTY_DIR}/imgui/backends/imgui_impl_dx12.h
-  ${THIRD_PARTY_DIR}/imgui/backends/imgui_impl_win32.h
-  ${THIRD_PARTY_DIR}/imgui/imgui_internal.h
-  ${THIRD_PARTY_DIR}/imgui/imstb_rectpack.h
-  ${THIRD_PARTY_DIR}/imgui/imstb_textedit.h
-  ${THIRD_PARTY_DIR}/imgui/imstb_truetype.h
+  ${IMGUI_SOURCE_DIR}/imgui.cpp
+  ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
+  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_dx12.cpp
+  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+  ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
+  ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
+  ${IMGUI_SOURCE_DIR}/imconfig.h
+  ${IMGUI_SOURCE_DIR}/imgui.h
+  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_dx12.h
+  ${IMGUI_SOURCE_DIR}/backends/imgui_impl_win32.h
+  ${IMGUI_SOURCE_DIR}/imgui_internal.h
+  ${IMGUI_SOURCE_DIR}/imstb_rectpack.h
+  ${IMGUI_SOURCE_DIR}/imstb_textedit.h
+  ${IMGUI_SOURCE_DIR}/imstb_truetype.h
 )
 
 add_library(

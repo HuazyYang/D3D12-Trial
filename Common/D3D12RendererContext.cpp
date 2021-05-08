@@ -4,7 +4,7 @@
 // D3D12RendererContext implementation.
 //
 D3D12RendererContext::D3D12RendererContext()
-    : m_uFrameWidth(800), m_uFrameHeight(600), m_BackBufferFormat(DXGI_FORMAT_R8G8B8A8_UNORM),
+    : m_uFrameWidth(800), m_uFrameHeight(600),
       m_DepthStencilBufferFormat(DXGI_FORMAT_D24_UNORM_S8_UINT),
       m_pd3dMsaaRenderTargetBuffer(nullptr), m_pDXGIFactory(nullptr), m_pDXGIAdapter(nullptr), m_pd3dDevice(nullptr),
       m_uRtvDescriptorSize(0), m_uDsvDescriptorSize(0), m_uCbvSrvUavDescriptorSize(0),
@@ -13,6 +13,14 @@ D3D12RendererContext::D3D12RendererContext()
       m_pRTVDescriptorHeap(nullptr), m_pDSVDescriptorHeap(nullptr),
       m_pd3dDepthStencilBuffer(nullptr),
       m_iCurrentBackBuffer(0), m_ScreenViewport{0, 0, 0, 0, 0, 0}, m_ScissorRect{0, 0, 0, 0} {
+
+
+  // When use sRGB format, back buffer format is different with swap chain format
+  // m_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+  // m_SwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+  m_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+  m_SwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
   m_aDeviceConfig.RequestHighPerformanceGpu = TRUE;
   /// Device configuration.
@@ -267,7 +275,7 @@ HRESULT D3D12RendererContext::CreateSwapChain(HWND hwnd) {
   dscd.BufferDesc.Height = m_uFrameHeight;
   dscd.BufferDesc.RefreshRate.Numerator = 60;
   dscd.BufferDesc.RefreshRate.Denominator = 1;
-  dscd.BufferDesc.Format = m_BackBufferFormat;
+  dscd.BufferDesc.Format = m_SwapChainFormat;
   dscd.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
   dscd.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
   dscd.SampleDesc.Count = 1;
@@ -474,7 +482,7 @@ HRESULT D3D12RendererContext::ResizeFrame(int cx, int cy) {
 
   // Resize the swap chain.
   V_RETURN(m_pSwapChain->ResizeBuffers(s_iSwapChainBufferCount, m_uFrameWidth, m_uFrameHeight,
-                                       m_BackBufferFormat, scDesc.Flags));
+                                       m_SwapChainFormat, scDesc.Flags));
 
   m_iCurrentBackBuffer = 0;
 
@@ -495,10 +503,17 @@ HRESULT D3D12RendererContext::ResizeFrame(int cx, int cy) {
   } else {
     D3D12_CPU_DESCRIPTOR_HANDLE rtvHeapHandle = {
         m_pRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart()};
+
+    D3D12_RENDER_TARGET_VIEW_DESC rtvDesc;
+    rtvDesc.Format = m_BackBufferFormat;
+    rtvDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    rtvDesc.Texture2D.MipSlice = 0;
+    rtvDesc.Texture2D.PlaneSlice = 0;
+
     for (i = 0; i < s_iSwapChainBufferCount; ++i) {
       m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_pd3dSwapChainBuffer[i]));
 
-      m_pd3dDevice->CreateRenderTargetView(m_pd3dSwapChainBuffer[i], nullptr, rtvHeapHandle);
+      m_pd3dDevice->CreateRenderTargetView(m_pd3dSwapChainBuffer[i], &rtvDesc, rtvHeapHandle);
 
       rtvHeapHandle.ptr += m_uRtvDescriptorSize;
     }

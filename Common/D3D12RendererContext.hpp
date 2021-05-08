@@ -83,6 +83,7 @@ protected:
 
   // Back buffer format.
   DXGI_FORMAT m_BackBufferFormat;
+  DXGI_FORMAT m_SwapChainFormat;
   DXGI_FORMAT m_DepthStencilBufferFormat;
 
   /// MSAA support.

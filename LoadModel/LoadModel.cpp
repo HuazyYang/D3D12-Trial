@@ -196,7 +196,7 @@ HRESULT LoadModelSample::CreatePSOs() {
 
   ComPtr<ID3D12PipelineState> pso;
 
-  psoDesc.InputLayout = {inputLayout, std::size(inputLayout)};
+  psoDesc.InputLayout = {inputLayout, (UINT)std::size(inputLayout)};
 
   V_RETURN(m_pd3dDevice->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(pso.ReleaseAndGetAddressOf())));
   m_aPSOs.push_back(std::move(pso));
@@ -213,7 +213,7 @@ HRESULT LoadModelSample::LoadModel() {
 
   m_Model.Create(&uploadBatch, LR"(directx-sdk-samples\Media\powerplant\\powerplant.sdkmesh)");
 
-  m_Model.GetResourceDescriptorHeap(m_pd3dDevice, &m_pModelDescriptorHeap);
+  m_Model.GetResourceDescriptorHeap(m_pd3dDevice, TRUE, &m_pModelDescriptorHeap);
 
   std::future<HRESULT> batchWaitable;
 
@@ -252,9 +252,7 @@ void LoadModelSample::OnRenderFrame(float fTime, float fElapsedTime) {
   V(pFrameResource->CommandAllocator->Reset());
   V(m_pd3dCommandList->Reset(pFrameResource->CommandAllocator.Get(), nullptr));
 
-  m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-                                                                              D3D12_RESOURCE_STATE_PRESENT,
-                                                                              D3D12_RESOURCE_STATE_RENDER_TARGET));
+  PrepareNextFrame();
 
   m_pd3dCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::Black, 1, &m_ScissorRect);
   m_pd3dCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f,
@@ -270,11 +268,9 @@ void LoadModelSample::OnRenderFrame(float fTime, float fElapsedTime) {
   m_pd3dCommandList->SetDescriptorHeaps(1, m_pModelDescriptorHeap.GetAddressOf());
 
   m_pd3dCommandList->SetGraphicsRootConstantBufferView(0, FrameResources::PassCBs.GetConstBufferAddress(m_iCurrentFrameIndex));
-  m_Model.Render(m_pd3dCommandList, m_pModelDescriptorHeap.Get(), 1, INVALID_SAMPLER_SLOT, INVALID_SAMPLER_SLOT);
+  m_Model.Render(m_pd3dCommandList, m_pModelDescriptorHeap->GetGPUDescriptorHandleForHeapStart(), 1, INVALID_SAMPLER_SLOT, INVALID_SAMPLER_SLOT);
 
-  m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-                                                                              D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                                                              D3D12_RESOURCE_STATE_PRESENT));
+  EndRenderFrame();
 
   V(m_pd3dCommandList->Close());
   m_pd3dCommandQueue->ExecuteCommandLists(1, CommandListCast(&m_pd3dCommandList));

@@ -184,9 +184,6 @@ void ReportFrameStats(HWND hwnd, float fTime, float fElapsed) {
   }
 }
 
-// Forward declare message handler from imgui_impl_win32.cpp
-extern LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
 LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   _WindowContext *pWndContext = reinterpret_cast<_WindowContext *>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
@@ -237,7 +234,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     // WM_DESTROY is sent when the window is being destroyed.
   case WM_DESTROY:
     PostQuitMessage(0);
-    return 0;
+    break;
     // The WM_MENUCHAR message is sent when a menu is active and the user presses
     // a key that does not correspond to any mnemonic or accelerator key.
   case WM_MENUCHAR:
@@ -263,7 +260,6 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     ret = pWndContext->pInteractor->OnMsgProc(hwnd, msg, wp, lp, &bNoFurtherProcessing);
 
   if(!bNoFurtherProcessing) {
-    ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
     ret = DefWindowProc(hwnd, msg, wp, lp);
   }
 

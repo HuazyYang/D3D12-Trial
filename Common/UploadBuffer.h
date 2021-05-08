@@ -2,13 +2,6 @@
 #include "d3dUtils.h"
 #include <vector>
 
-class UploadBufferPool {
-public:
-
-private:
-    std::vector<ID3D12Resource> m_aUploadBuffers;
-};
-
 class UploadBuffer
 {
 public:
@@ -38,3 +31,38 @@ protected:
     UINT            m_cbElementStride = 0;
 };
 
+
+
+class UploadBufferStack {
+public:
+  UploadBufferStack();
+  ~UploadBufferStack();
+  HRESULT Initialize(ID3D12Device *pDevice, UINT BlockSize, UINT ReservedBlockCount);
+  HRESULT Push(_In_ const void *pData, _In_ UINT uBufferSize, _Out_opt_ D3D12_CONSTANT_BUFFER_VIEW_DESC *pCBV = nullptr);
+  HRESULT Push(_In_ UINT uBufferSize, _Out_opt_ void **ppMappedData, _Out_opt_ D3D12_CONSTANT_BUFFER_VIEW_DESC *pCBV = nullptr);
+  D3D12_CONSTANT_BUFFER_VIEW_DESC Top();
+  void Clear();
+  void ClearCapacity();
+private:
+  void Destroy();
+  void LockAllocator();
+  void UnlockAllocator();
+
+  struct BufferStorage {
+    ID3D12Resource *UploadBuffer;
+    UINT BufferSize;
+    void *pMappedData;
+  };
+
+  ID3D12Device *m_pd3dDevice;
+  std::vector<BufferStorage> m_aBufferStorage;
+  UINT m_uBlockSize;
+  UINT m_uReservedBlockCount;
+  UINT m_uCurrBlock;
+  D3D12_GPU_VIRTUAL_ADDRESS m_pCurrBufferLocation;
+  UINT m_uCurrOffsetInBlock;
+  UINT m_uCurrBufferSize;
+
+  // Multithread support
+  CRITICAL_SECTION m_csAlloc;
+};

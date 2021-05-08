@@ -98,11 +98,11 @@ HRESULT CDXUTSDKMesh::CreateTextureFromFile(_In_ ResourceUploadBatch *pUploadBat
   return hr;
 }
 
-HRESULT CDXUTSDKMesh::GetResourceDescriptorHeap(_In_ ID3D12Device* pDev12, _Out_ ID3D12DescriptorHeap **ppHeap) const {
+HRESULT CDXUTSDKMesh::GetResourceDescriptorHeap(_In_ ID3D12Device* pDev12, BOOL bShaderVisible, _Out_ ID3D12DescriptorHeap **ppHeap) const {
 
     HRESULT hr = S_OK;
     D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
-    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    heapDesc.Flags = bShaderVisible ? D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE : D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
     heapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
     heapDesc.NumDescriptors = (INT)m_TextureCache.size();
     UINT uCbvSrvUavIncrementSize;
@@ -702,7 +702,7 @@ _Use_decl_annotations_
 void CDXUTSDKMesh::RenderMesh( UINT iMesh,
                                bool bAdjacent,
                                ID3D12GraphicsCommandList* pd3dCommandList,
-                               ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                               D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                                UINT iDiffuseSlot,
                                UINT iNormalSlot,
                                UINT iSpecularSlot )
@@ -760,7 +760,7 @@ void CDXUTSDKMesh::RenderMesh( UINT iMesh,
     pd3dCommandList->GetDevice(IID_PPV_ARGS(&pd3dDevice));
     uCbvSrvUavIncrementSize = pd3dDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     SAFE_RELEASE(pd3dDevice);
-    handle0 = pResourceDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+    handle0 = hDescriptorStart;
 
     for( UINT subset = 0; subset < pMesh->NumSubsets; subset++ )
     {
@@ -820,7 +820,7 @@ _Use_decl_annotations_
 void CDXUTSDKMesh::RenderFrame( UINT iFrame,
                                 bool bAdjacent,
                                 ID3D12GraphicsCommandList* pd3dCommandList,
-                                ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                                D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                                 UINT iDiffuseSlot,
                                 UINT iNormalSlot,
                                 UINT iSpecularSlot )
@@ -833,7 +833,7 @@ void CDXUTSDKMesh::RenderFrame( UINT iFrame,
         RenderMesh( m_pFrameArray[iFrame].Mesh,
                     bAdjacent,
                     pd3dCommandList,
-                    pResourceDescriptorHeap,
+                    hDescriptorStart,
                     iDiffuseSlot,
                     iNormalSlot,
                     iSpecularSlot );
@@ -841,12 +841,12 @@ void CDXUTSDKMesh::RenderFrame( UINT iFrame,
 
     // Render our children
     if( m_pFrameArray[iFrame].ChildFrame != INVALID_FRAME )
-        RenderFrame( m_pFrameArray[iFrame].ChildFrame, bAdjacent, pd3dCommandList, pResourceDescriptorHeap, iDiffuseSlot, 
+        RenderFrame( m_pFrameArray[iFrame].ChildFrame, bAdjacent, pd3dCommandList, hDescriptorStart, iDiffuseSlot, 
                      iNormalSlot, iSpecularSlot );
 
     // Render our siblings
     if( m_pFrameArray[iFrame].SiblingFrame != INVALID_FRAME )
-        RenderFrame( m_pFrameArray[iFrame].SiblingFrame, bAdjacent, pd3dCommandList, pResourceDescriptorHeap, iDiffuseSlot, 
+        RenderFrame( m_pFrameArray[iFrame].SiblingFrame, bAdjacent, pd3dCommandList, hDescriptorStart, iDiffuseSlot, 
                      iNormalSlot, iSpecularSlot );
 }
 
@@ -1090,23 +1090,23 @@ void CDXUTSDKMesh::TransformMesh( CXMMATRIX world, double fTime )
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 void CDXUTSDKMesh::Render( ID3D12GraphicsCommandList* pd3dCommandList,
-                           ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                           D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                            UINT iDiffuseSlot,
                            UINT iNormalSlot,
                            UINT iSpecularSlot )
 {
-    RenderFrame( 0, false, pd3dCommandList, pResourceDescriptorHeap, iDiffuseSlot, iNormalSlot, iSpecularSlot );
+    RenderFrame( 0, false, pd3dCommandList, hDescriptorStart, iDiffuseSlot, iNormalSlot, iSpecularSlot );
 }
 
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 void CDXUTSDKMesh::RenderAdjacent( ID3D12GraphicsCommandList* pd3dCommandList,
-                                   ID3D12DescriptorHeap *pResourceDescriptorHeap,
+                                   D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
                                    UINT iDiffuseSlot,
                                    UINT iNormalSlot,
                                    UINT iSpecularSlot )
 {
-    RenderFrame( 0, true, pd3dCommandList, pResourceDescriptorHeap, iDiffuseSlot, iNormalSlot, iSpecularSlot );
+    RenderFrame( 0, true, pd3dCommandList, hDescriptorStart, iDiffuseSlot, iNormalSlot, iSpecularSlot );
 }
 
 
