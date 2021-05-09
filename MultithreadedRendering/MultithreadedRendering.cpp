@@ -200,7 +200,7 @@ protected:
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::Begin("", nullptr, ImGuiWindowFlags_NoBackground);
+    ImGui::Begin("Rendering opts", nullptr, ImGuiWindowFlags_NoBackground);
     ImGui::RadioButton("ST Def", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_ST);
     ImGui::RadioButton("MT Def/Scene", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_SCENE);
     ImGui::RadioButton("MT Def/Chunk", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_CHUNK);
@@ -241,7 +241,6 @@ private:
 };
 
 class MultithreadedRenderingSample : public D3D12RendererContext, public ImGuiInteractor {
-public:
 private:
   HRESULT OnInitPipelines() override;
   void OnDestroy() override;
@@ -351,13 +350,14 @@ private:
   FLOAT                          g_fLightFalloffCosAngleRange[s_iNumLights];
 
   // Thread pool scheduling
-  PTP_POOL m_pThreadPool = nullptr;
+  PTP_POOL m_pThreadpool = nullptr;
   PTP_CLEANUP_GROUP m_pCleanupGroup = nullptr;
   TP_CALLBACK_ENVIRON m_CallbackEnv;
-  PTP_WORK m_pWorkQueuePool[64]; // Same as maximum kernel objects can be passed to WaitForMultipleObjects
+  PTP_WORK m_aSceneWorkQueuePool[64]; // Same as maximum kernel objects can be passed to WaitForMultipleObjects
+  PTP_WORK m_aChunkWorkQueuePool[64];
   int m_iWorkQueueMaxParallelCapacity = 64; // Determine the maximum parallel work queue count according to current
                                             // active CPU logical processor count.
-  int m_aWorkQueueCurrWorkIndices[64]; // Used as the arguments passed to work queue.
+  void *m_aWorkQueueItemArgs[64]; // Used as the arguments passed to work queue.
   HANDLE m_aWorkQueueParallelEvents[64]; // Notify the main thread that work item call back function has completed.
 };
 
@@ -387,6 +387,9 @@ HRESULT MultithreadedRenderingSample::OnInitPipelines() {
   InitLights();
 
   V_RETURN(ImGuiInteractor::OnInitialize(m_pd3dDevice, s_uTotalFrameCount, m_BackBufferFormat));
+
+  // thread pool
+  V_RETURN(InitializeRendererThreadpool());
 
   V_RETURN(m_InitPipelineWaitable.get());
   return hr;
@@ -1386,22 +1389,53 @@ HRESULT MultithreadedRenderingSample::InitializeRendererThreadpool() {
   HRESULT hr = S_OK;
   int minProcCount = 1, maxProcCount = 64;
 
-  m_pThreadPool = CreateThreadpool(nullptr);
+  m_pThreadpool = CreateThreadpool(nullptr);
   m_pCleanupGroup = CreateThreadpoolCleanupGroup();
-  if(!m_pThreadPool || !m_pCleanupGroup)
+  if(!m_pThreadpool || !m_pCleanupGroup) {
+    if(m_pThreadpool) {
+      CloseThreadpool(m_pThreadpool);
+      m_pThreadpool = nullptr;
+    } if(m_pCleanupGroup) {
+      CloseThreadpoolCleanupGroup(m_pCleanupGroup);
+      m_pCleanupGroup = nullptr;
+    }
+
     return HRESULT_FROM_WIN32(GetLastError());
+  }
 
   InitializeThreadpoolEnvironment(&m_CallbackEnv);
 
-  SetThreadpoolCallbackPool(&m_CallbackEnv, m_pThreadPool);
+  SetThreadpoolCallbackPool(&m_CallbackEnv, m_pThreadpool);
   SetThreadpoolCallbackCleanupGroup(&m_CallbackEnv, m_pCleanupGroup, nullptr);
 
   maxProcCount = GetLogicalProcessorCount() - 1;
   maxProcCount = std::max(maxProcCount, minProcCount);
-  SetThreadpoolThreadMinimum(m_pThreadPool, minProcCount);
-  SetThreadpoolThreadMaximum(m_pThreadPool, maxProcCount);
+  SetThreadpoolThreadMinimum(m_pThreadpool, minProcCount);
+  SetThreadpoolThreadMaximum(m_pThreadpool, maxProcCount);
 
   m_iWorkQueueMaxParallelCapacity = std::min(64, maxProcCount);
+
+  ZeroMemory(m_aWorkQueueItemArgs, sizeof(m_aWorkQueueItemArgs));
+
+  for(int i = 0; i < m_iWorkQueueMaxParallelCapacity; ++i) {
+
+    m_aSceneWorkQueuePool[i] = CreateThreadpoolWork(_PerSceneRenderDeferredProc,
+      &m_aWorkQueueItemArgs[i], &m_CallbackEnv);
+    if(m_aSceneWorkQueuePool[i] == nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    m_aChunkWorkQueuePool[i] = CreateThreadpoolWork(_PerChunkRenderDeferredProc,
+      &m_aChunkWorkQueuePool[i], &m_CallbackEnv);
+    if(m_aChunkWorkQueuePool[i] == nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    m_aWorkQueueParallelEvents[i] = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
+    if(m_aWorkQueueParallelEvents[i] == nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+  }
 
   return hr;
 }
