@@ -324,16 +324,21 @@ HRESULT D3D12RendererContext::CreateMsaaRenderBuffer() {
   return hr;
 }
 
-VOID D3D12RendererContext::PrepareNextFrame() {
-  m_pd3dCommandList->ResourceBarrier(
+VOID D3D12RendererContext::PrepareNextFrame(_In_opt_ ID3D12GraphicsCommandList *pCommandList) {
+
+  if(pCommandList == nullptr) pCommandList = m_pd3dCommandList;
+
+  pCommandList->ResourceBarrier(
       1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
                                                IsMsaaEnabled() ? D3D12_RESOURCE_STATE_RESOLVE_SOURCE
                                                                : D3D12_RESOURCE_STATE_PRESENT,
                                                D3D12_RESOURCE_STATE_RENDER_TARGET));
 }
 
-VOID D3D12RendererContext::EndRenderFrame() {
+VOID D3D12RendererContext::EndRenderFrame(_In_opt_ ID3D12GraphicsCommandList *pCommandList) {
 
+  if (pCommandList == nullptr)
+    pCommandList = m_pd3dCommandList;
   if (IsMsaaEnabled()) {
     CD3DX12_RESOURCE_BARRIER barriers[] = {
         CD3DX12_RESOURCE_BARRIER::Transition(m_pd3dMsaaRenderTargetBuffer,
@@ -343,20 +348,20 @@ VOID D3D12RendererContext::EndRenderFrame() {
                                              D3D12_RESOURCE_STATE_PRESENT,
                                              D3D12_RESOURCE_STATE_RESOLVE_DEST)};
 
-    m_pd3dCommandList->ResourceBarrier(2, barriers);
+    pCommandList->ResourceBarrier(2, barriers);
 
-    m_pd3dCommandList->ResolveSubresource(m_pd3dSwapChainBuffer[m_iCurrentBackBuffer], 0,
+    pCommandList->ResolveSubresource(m_pd3dSwapChainBuffer[m_iCurrentBackBuffer], 0,
                                           m_pd3dMsaaRenderTargetBuffer, 0, m_BackBufferFormat);
 
     barriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(m_pd3dSwapChainBuffer[m_iCurrentBackBuffer],
                                                        D3D12_RESOURCE_STATE_RESOLVE_DEST,
                                                        D3D12_RESOURCE_STATE_PRESENT);
 
-    m_pd3dCommandList->ResourceBarrier(1, barriers);
+    pCommandList->ResourceBarrier(1, barriers);
 
   } else {
 
-    m_pd3dCommandList->ResourceBarrier(
+    pCommandList->ResourceBarrier(
         1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pd3dSwapChainBuffer[m_iCurrentBackBuffer],
                                                  D3D12_RESOURCE_STATE_RENDER_TARGET,
                                                  D3D12_RESOURCE_STATE_PRESENT));

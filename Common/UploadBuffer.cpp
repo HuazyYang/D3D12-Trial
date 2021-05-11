@@ -92,7 +92,6 @@ UploadBufferStack::UploadBufferStack() {
   m_uBlockSize = 0;
   m_uReservedBlockCount = 0;
   m_uCurrBlock = -1;
-  m_pCurrBufferLocation = 0;
   m_uCurrOffsetInBlock = 0;
   m_uCurrBufferSize = 0;
   InitializeCriticalSectionAndSpinCount(&m_csAlloc, 40000);
@@ -136,7 +135,6 @@ HRESULT UploadBufferStack::Initialize(ID3D12Device *pDevice, UINT BlockSize, UIN
   m_uBlockSize = d3dUtils::CalcConstantBufferByteSize(BlockSize);
   m_uReservedBlockCount = ReservedBlockCount;
   m_uCurrBlock = -1;
-  m_pCurrBufferLocation = 0;
   m_uCurrOffsetInBlock = 0;
   m_uCurrBufferSize = 0;
   return S_OK;
@@ -161,6 +159,7 @@ HRESULT UploadBufferStack::Push(_In_ UINT uBufferSize, _Out_opt_ void **ppMapped
   UINT uNextOffset;
   UINT uEndOffset;
   void *pMappedData = nullptr;
+  D3D12_GPU_VIRTUAL_ADDRESS pCurrBufferLocation;
 
   if(uBufferSize > m_uBlockSize) {
     DX_TRACE(L"UploadBufferStack: Block size(%u byte) is smaller than request block size(%u byte)!", m_uBlockSize,
@@ -202,24 +201,20 @@ HRESULT UploadBufferStack::Push(_In_ UINT uBufferSize, _Out_opt_ void **ppMapped
     pMappedData = m_aBufferStorage[m_uCurrBlock].pMappedData;
   }
 
-  m_pCurrBufferLocation = pCurrBuffer->GetGPUVirtualAddress() + uNextOffset;
+  pCurrBufferLocation = pCurrBuffer->GetGPUVirtualAddress() + uNextOffset;
 
   m_uCurrOffsetInBlock = uNextOffset;
   m_uCurrBufferSize  = uBufferSize;
 
+  UnlockAllocator();
+
   if(ppMappedData) *ppMappedData = (BYTE *)pMappedData + uNextOffset;
   if(pCBV) {
-    pCBV->BufferLocation = m_pCurrBufferLocation;
+    pCBV->BufferLocation = pCurrBufferLocation;
     pCBV->SizeInBytes = uBufferSize;
   }
 
-  UnlockAllocator();
-
   return hr;
-}
-
-D3D12_CONSTANT_BUFFER_VIEW_DESC UploadBufferStack::Top() {
-  return { m_pCurrBufferLocation, m_uCurrBufferSize };
 }
 
 void UploadBufferStack::Clear() {
@@ -231,8 +226,7 @@ void UploadBufferStack::Clear() {
   } else {
     m_uCurrBlock = 0;
   }
-
-  m_pCurrBufferLocation = 0;
+  
   m_uCurrOffsetInBlock = 0;
   m_uCurrBufferSize = 0;
 

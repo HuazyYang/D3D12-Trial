@@ -47,8 +47,8 @@ protected:
   HRESULT CreateRtvAndDsvDescriptorHeaps();
   HRESULT CreateMsaaRenderBuffer();
 
-  VOID PrepareNextFrame();
-  VOID EndRenderFrame();
+  VOID PrepareNextFrame(_In_opt_ ID3D12GraphicsCommandList *pCommandList = nullptr);
+  VOID EndRenderFrame(_In_opt_ ID3D12GraphicsCommandList *pCommandList = nullptr);
 
   HRESULT Present();
   void FlushCommandQueue();

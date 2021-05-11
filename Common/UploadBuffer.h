@@ -40,7 +40,6 @@ public:
   HRESULT Initialize(ID3D12Device *pDevice, UINT BlockSize, UINT ReservedBlockCount);
   HRESULT Push(_In_ const void *pData, _In_ UINT uBufferSize, _Out_opt_ D3D12_CONSTANT_BUFFER_VIEW_DESC *pCBV = nullptr);
   HRESULT Push(_In_ UINT uBufferSize, _Out_opt_ void **ppMappedData, _Out_opt_ D3D12_CONSTANT_BUFFER_VIEW_DESC *pCBV = nullptr);
-  D3D12_CONSTANT_BUFFER_VIEW_DESC Top();
   void Clear();
   void ClearCapacity();
 private:
@@ -59,7 +58,6 @@ private:
   UINT m_uBlockSize;
   UINT m_uReservedBlockCount;
   UINT m_uCurrBlock;
-  D3D12_GPU_VIRTUAL_ADDRESS m_pCurrBufferLocation;
   UINT m_uCurrOffsetInBlock;
   UINT m_uCurrBufferSize;
 

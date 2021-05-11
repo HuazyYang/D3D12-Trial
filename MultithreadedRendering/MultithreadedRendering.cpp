@@ -3,10 +3,10 @@
 #include <Win32Application.hpp>
 #include <DirectXMath.h>
 #include <DirectXColors.h>
-#include <SDKmesh.h>
 #include <ResourceUploadBatch.hpp>
-#include <array>
 #include <RootSignatureGenerator.h>
+#include <array>
+#include "MultithreadedDXUTMesh.h"
 #include <Camera.h>
 #include <UploadBuffer.h>
 #include <imgui.h>
@@ -97,19 +97,27 @@ struct CB_PER_SCENE {
   XMFLOAT4 m_vTintColor;
 };
 
+enum SCENE_MT_RENDER_CASE {
+  SCENE_MT_RENDER_CASE_DEFAULT,
+  SCENE_MT_RENDER_CASE_SHADOW,
+  SCENE_MT_RENDER_CASE_MIRROR_AREA,
+};
+
 struct SceneParamsStatic {
-  BOOL bRenderShadow;
+  SCENE_MT_RENDER_CASE RenderCase;
   PipelineStateTuple *pPipelineStateTuple;
   ID3D12Resource *pShadowTexture; // For rendering shadow map
   D3D12_CPU_DESCRIPTOR_HANDLE hRenderTargetView;
   D3D12_CPU_DESCRIPTOR_HANDLE hDepthStencilView;
+  D3D12_VIEWPORT Viewport;
+  D3D12_RECT ScissorRect;
+
   UploadBufferStack *pConstBufferStack; // For allocating constant buffers.
 
   UINT8 uStencilRef;
 
   XMFLOAT4 vTintColor;
   XMFLOAT4 vMirrorPlane;
-  const D3D12_VIEWPORT *pViewport;
 };
 
 struct SceneParamsDynamic {
@@ -119,13 +127,41 @@ struct SceneParamsDynamic {
 struct FrameResources {
   ComPtr<ID3D12CommandAllocator> CommandAllocator;
 
-  ComPtr<ID3D12GraphicsCommandList> ShadowCommandList;
-  ComPtr<ID3D12CommandAllocator> ShadowCommandAllocator;
-  ComPtr<ID3D12GraphicsCommandList> MirrorCommandList;
-  ComPtr<ID3D12CommandAllocator> MirrorCommandAllocator;
+  ComPtr<ID3D12GraphicsCommandList> ShadowCommandLists[s_iNumShadows];
+  ComPtr<ID3D12CommandAllocator> ShadowCommandAllocators[s_iNumShadows];
+  ComPtr<ID3D12GraphicsCommandList> MirrorCommandLists[s_iNumMirrors];
+  ComPtr<ID3D12CommandAllocator> MirrorCommandAllocators[s_iNumMirrors];
+
+  ComPtr<ID3D12GraphicsCommandList> ChunkCommandLists[MAXIMUM_WAIT_OBJECTS];
+  ComPtr<ID3D12CommandAllocator> ChunkCommandAllocators[MAXIMUM_WAIT_OBJECTS];
 
   UploadBufferStack ConstBufferStack;
   UINT64 FencePoint;
+};
+
+class MultithreadedRenderingSample;
+
+struct SCENE_RENDERING_THREAD_PARAMS {
+  int SlotIndex;
+  HANDLE CompletionEvent;
+  FrameResources                      *pFrameResources;
+  MultithreadedRenderingSample        *pInstance;
+  int BatchIndex;
+  SCENE_MT_RENDER_CASE RenderCase;
+};
+
+struct CHUNK_RENDERING_THREAD_PARAMS {
+  MultithreadedRenderingSample *pInstance;
+  int ChunkIndex;
+  FrameResources *pFrameResources;
+  HANDLE PassBeginEvent;
+  HANDLE PassEndEvent;
+};
+
+// Chunk thread local variables
+struct CHUNK_RENDERING_THREAD_LOCAL_VARS {
+  int ChunkIndex;
+  volatile ULONG NextDrawcallIndex;
 };
 
 class ImGuiInteractor: public WindowInteractor {
@@ -228,6 +264,18 @@ protected:
     return ret;
   }
 
+  BOOL IsMultithreadedPerScene() const {
+    return m_RenderSchedulingOption == RENDER_SCHEDULING_OPTION_MT_SCENE;
+  }
+
+  BOOL IsSinglethreadedDeferred() const {
+    return m_RenderSchedulingOption == RENDER_SCHEDULING_OPTION_ST;
+  }
+
+  BOOL IsMultithreadedPerChunk() const {
+    return m_RenderSchedulingOption == RENDER_SCHEDULING_OPTION_MT_CHUNK;
+  }
+
 private:
   void BeginInteraction() {
     ImGui::SetCurrentContext(m_pImGuiCtx);
@@ -248,13 +296,13 @@ private:
   void OnFrameMoved(float fTime, float fElapsed) override;
   void OnRenderFrame(float fTime, float fElapsed) override;
   void OnResizeFrame(int cx, int cy) override;
-
-  void RenderShadowMap(int iShadow, ID3D12GraphicsCommandList *pCommandList);
   void RenderScene(ID3D12GraphicsCommandList *pCommandList, const SceneParamsStatic *pStaticParams,
                    const SceneParamsDynamic *pDynamicParams);
-  void RenderSceneSetup(ID3D12GraphicsCommandList *pCommandList, const SceneParamsStatic *pStaticParams,
-                        const SceneParamsDynamic *pDynamicParams);
-  void RenderMirror(int iMirror, FrameResources *pFrameResources, ID3D12GraphicsCommandList *pCommandList);
+
+  void RenderShadow(int iShadow, FrameResources *pFrameResources);
+  void RenderMirror(int iMirror, FrameResources *pFrameResources);
+  void RenderSceneDirect(FrameResources *pFrameResources);
+  void OnPerChunkRenderDeferred(int chunkIndex, FrameResources* const* ppFrameResources);
 
   // UI
   LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
@@ -273,7 +321,31 @@ private:
 
   HRESULT InitializeRendererThreadpool();
 
-  CDXUTSDKMesh m_Model;
+  static VOID CALLBACK _PerSceneRenderDeferredProc(
+    _Inout_     PTP_CALLBACK_INSTANCE Instance,
+    _Inout_opt_ PVOID                 Context,
+    _Inout_     PTP_WORK              Work
+  );
+
+  static unsigned int WINAPI _PerChunkRenderDeferredProc(LPVOID pv);
+
+  static void RenderMesh(CMultithreadedDXUTMesh *pMesh,
+                         UINT iMesh,
+                         bool bAdjacent,
+                         ID3D12GraphicsCommandList *pd3dCommandList,
+                         D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
+                         UINT iDiffuseSlot,
+                         UINT iNormalSlot,
+                         UINT iSpecularSlot,
+                         void *pUserContext);
+
+  int GetCurrentChunkThreadIndex() const;
+  void ResetCurrentChunkThreadDrawcallIndex();
+  // Increment current chunk thread drawcall index
+  // and return the previous draw call index
+  ULONG IncrementCurrentChunkThreadDrawcallIndex();
+
+  CMultithreadedDXUTMesh m_Model;
   ComPtr<ID3D12DescriptorHeap> m_pModelDescriptorHeap;
   std::future<HRESULT> m_InitPipelineWaitable;
 
@@ -353,12 +425,17 @@ private:
   PTP_POOL m_pThreadpool = nullptr;
   PTP_CLEANUP_GROUP m_pCleanupGroup = nullptr;
   TP_CALLBACK_ENVIRON m_CallbackEnv;
-  PTP_WORK m_aSceneWorkQueuePool[64]; // Same as maximum kernel objects can be passed to WaitForMultipleObjects
-  PTP_WORK m_aChunkWorkQueuePool[64];
-  int m_iWorkQueueMaxParallelCapacity = 64; // Determine the maximum parallel work queue count according to current
-                                            // active CPU logical processor count.
-  void *m_aWorkQueueItemArgs[64]; // Used as the arguments passed to work queue.
-  HANDLE m_aWorkQueueParallelEvents[64]; // Notify the main thread that work item call back function has completed.
+
+  PTP_WORK m_aShadowWorkQueuePool[s_iNumShadows];
+  SCENE_RENDERING_THREAD_PARAMS m_aShadowWorkQueueParams[s_iNumShadows];
+  PTP_WORK m_aMirrorWorkQueuePool[s_iNumMirrors];
+  SCENE_RENDERING_THREAD_PARAMS m_aMirrorWorkQueuePoolParams[s_iNumMirrors];
+  DWORD m_dwChunkThreadsLocalSlot; // Chunk threads local index variable slot.
+  UINT   m_uNumberOfChunkThreads; // Work queue item count in parallel for a single render frame.
+  HANDLE m_aChunkThreads[MAXIMUM_WAIT_OBJECTS];
+  CHUNK_RENDERING_THREAD_PARAMS m_aChunkThreadArgs[MAXIMUM_WAIT_OBJECTS];
+  CHUNK_RENDERING_THREAD_LOCAL_VARS m_aChunkThreadLocalVars[MAXIMUM_WAIT_OBJECTS+1];
+  volatile LONG m_lShowdownChunkThreads = 0;
 };
 
 HRESULT CreateMultithreadRenderingRendererAndInteractor(D3D12RendererContext **ppRenderer,
@@ -381,6 +458,8 @@ HRESULT MultithreadedRenderingSample::OnInitPipelines() {
   V_RETURN(CreatePSOs());
   V_RETURN(CreateShadowDepthStencilViews());
   V_RETURN(CreateStaticDescriptorHeap());
+  // thread pool
+  V_RETURN(InitializeRendererThreadpool());
   V_RETURN(CreateFrameResources());
 
   InitCamera();
@@ -388,23 +467,97 @@ HRESULT MultithreadedRenderingSample::OnInitPipelines() {
 
   V_RETURN(ImGuiInteractor::OnInitialize(m_pd3dDevice, s_uTotalFrameCount, m_BackBufferFormat));
 
-  // thread pool
-  V_RETURN(InitializeRendererThreadpool());
-
   V_RETURN(m_InitPipelineWaitable.get());
   return hr;
 }
 
 void MultithreadedRenderingSample::OnDestroy() {
   ImGuiInteractor::OnDestroy();
+
+  for(auto &param : m_aShadowWorkQueueParams) {
+    if(param.CompletionEvent != NULL) {
+      CloseHandle(param.CompletionEvent);
+      param.CompletionEvent = nullptr;
+    }
+  }
+  for(auto &param : m_aMirrorWorkQueuePoolParams) {
+    if(param.CompletionEvent != NULL) {
+      CloseHandle(param.CompletionEvent);
+      param.CompletionEvent = nullptr;
+    }
+  }
+
+  if(m_pCleanupGroup) {
+    CloseThreadpoolCleanupGroupMembers(m_pCleanupGroup, TRUE, nullptr);
+    CloseThreadpoolCleanupGroup(m_pCleanupGroup);
+  }
+  if(m_pThreadpool)
+    CloseThreadpool(m_pThreadpool);
+
+  // Notify the chunk threads that we want exit now
+  m_lShowdownChunkThreads = 1;
+  FrameResources *pFrameResources = &m_aFrameResources[0];
+  OnPerChunkRenderDeferred(-1, &pFrameResources);
+
+  int numChunkThreads = m_uNumberOfChunkThreads - 1;
+  for(int i = 0; i < numChunkThreads; ++i) {
+    if(m_aChunkThreads[i] != nullptr)
+      CloseHandle(m_aChunkThreads[i]);
+    if(m_aChunkThreadArgs[i].PassBeginEvent != nullptr)
+      CloseHandle(m_aChunkThreadArgs[i].PassBeginEvent);
+    if(m_aChunkThreadArgs[i].PassEndEvent != nullptr)
+      CloseHandle(m_aChunkThreadArgs[i].PassEndEvent);
+  }
 }
 
 HRESULT MultithreadedRenderingSample::CreateFrameResources() {
   HRESULT hr = S_OK;
+  char nameBuf[256];
+  int numChunkThreads = m_uNumberOfChunkThreads - 1;
+
   for(auto &frameResources : m_aFrameResources) {
     V_RETURN(frameResources.ConstBufferStack.Initialize(m_pd3dDevice, (1 << 12), 1));
     V_RETURN(m_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                                   IID_PPV_ARGS(&frameResources.CommandAllocator)));
+    for(int i = 0; i < s_iNumShadows; ++i) {
+      V_RETURN(m_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                    IID_PPV_ARGS(&frameResources.ShadowCommandAllocators[i])));
+      sprintf_s(nameBuf, "ShadowCommandAlloactors[%d]", i);
+      DX_SetDebugName(frameResources.ShadowCommandAllocators[i].Get(), nameBuf);
+      V_RETURN(m_pd3dDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                               frameResources.ShadowCommandAllocators[i].Get(), nullptr,
+                                               IID_PPV_ARGS(&frameResources.ShadowCommandLists[i])));
+      sprintf_s(nameBuf, "ShadowCommandLists[%d]", i);
+      DX_SetDebugName(frameResources.ShadowCommandLists[i].Get(), nameBuf);
+      frameResources.ShadowCommandLists[i]->Close();
+    }
+
+    for(int i = 0; i < s_iNumMirrors; ++i) {
+      V_RETURN(m_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                    IID_PPV_ARGS(&frameResources.MirrorCommandAllocators[i])));
+      sprintf_s(nameBuf, "MirrorCommandAllocators[%d]", i);
+      DX_SetDebugName(frameResources.MirrorCommandAllocators[i].Get(), nameBuf);
+      V_RETURN(m_pd3dDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                               frameResources.MirrorCommandAllocators[i].Get(), nullptr,
+                                               IID_PPV_ARGS(&frameResources.MirrorCommandLists[i])));
+      sprintf_s(nameBuf, "MirrorCommandLists[%d]", i);
+      DX_SetDebugName(frameResources.MirrorCommandLists[i].Get(), nameBuf);
+      frameResources.MirrorCommandLists[i]->Close();
+    }
+
+    for(int i = 0; i < numChunkThreads; ++i) {
+      V_RETURN(m_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                    IID_PPV_ARGS(&frameResources.ChunkCommandAllocators[i])));
+      sprintf_s(nameBuf, "ChunkCommandAllocators[%d]", i);
+      DX_SetDebugName(frameResources.ChunkCommandAllocators[i].Get(), nameBuf);
+      V_RETURN(m_pd3dDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                               frameResources.ChunkCommandAllocators[i].Get(), nullptr,
+                                               IID_PPV_ARGS(&frameResources.ChunkCommandLists[i])));
+      sprintf_s(nameBuf, "ChunkCommandLists[%d]", i);
+      DX_SetDebugName(frameResources.ChunkCommandLists[i].Get(), nameBuf);
+      frameResources.ChunkCommandLists[i]->Close();
+    }
+
     frameResources.FencePoint = 0;
   }
 
@@ -505,10 +658,15 @@ HRESULT MultithreadedRenderingSample::CreateStaticDescriptorHeap() {
 HRESULT MultithreadedRenderingSample::LoadModel() {
   HRESULT hr;
   ResourceUploadBatch uploadBatch(m_pd3dDevice, &m_MemAllocator);
+  MT_SDKMESH_CALLBACKS12 createAndRenderCallbacks = {};
 
   V_RETURN(uploadBatch.Begin(D3D12_COMMAND_LIST_TYPE_DIRECT));
 
-  V_RETURN(m_Model.Create(&uploadBatch, LR"(directx-sdk-samples\Media\SquidRoom\SquidRoom.sdkmesh)"));
+  createAndRenderCallbacks.RenderMeshCallback.pRenderMesh = &MultithreadedRenderingSample::RenderMesh;
+  createAndRenderCallbacks.RenderMeshCallback.pRenderUserContext = this;
+
+  V_RETURN(m_Model.Create(&uploadBatch, LR"(directx-sdk-samples\Media\SquidRoom\SquidRoom.sdkmesh)",
+    &createAndRenderCallbacks));
 
   V_RETURN(CreateMirrorModels(&uploadBatch));
 
@@ -1027,29 +1185,84 @@ XMMATRIX MultithreadedRenderingSample::CalcLightViewProj( int iLight, BOOL bAdap
 
     XMMATRIX mLightView = XMMatrixLookAtLH( vLightPos, vLookAt, g_XMIdentityR1 );
 
-    XMMATRIX mLightProj = XMMatrixPerspectiveFovLH( g_fLightFOV[iLight], bAdapterFOV ? GetAspectRatio() : g_fLightAspect[iLight], g_fLightNearPlane[iLight], g_fLightFarPlane[iLight] );
+    XMMATRIX mLightProj =
+        XMMatrixPerspectiveFovLH(g_fLightFOV[iLight], bAdapterFOV ? GetAspectRatio() : g_fLightAspect[iLight],
+                                 g_fLightNearPlane[iLight], g_fLightFarPlane[iLight]);
 
     return mLightView * mLightProj;
+}
+
+int MultithreadedRenderingSample::GetCurrentChunkThreadIndex() const {
+  auto pVars = reinterpret_cast<CHUNK_RENDERING_THREAD_LOCAL_VARS *>(TlsGetValue(m_dwChunkThreadsLocalSlot));
+  return pVars->ChunkIndex;
+}
+
+void MultithreadedRenderingSample::ResetCurrentChunkThreadDrawcallIndex() {
+  auto pVars = reinterpret_cast<CHUNK_RENDERING_THREAD_LOCAL_VARS *>(TlsGetValue(m_dwChunkThreadsLocalSlot));
+  pVars->NextDrawcallIndex = 0;
+}
+
+ULONG MultithreadedRenderingSample::IncrementCurrentChunkThreadDrawcallIndex() {
+  auto pVars = reinterpret_cast<CHUNK_RENDERING_THREAD_LOCAL_VARS *>(TlsGetValue(m_dwChunkThreadsLocalSlot));
+  return InterlockedIncrement(&pVars->NextDrawcallIndex) - 1;
+}
+
+void MultithreadedRenderingSample::RenderMesh(
+  CMultithreadedDXUTMesh* pMesh, 
+  UINT iMesh,
+  bool bAdjacent,
+  ID3D12GraphicsCommandList* pd3dCommandList,
+  D3D12_GPU_DESCRIPTOR_HANDLE hDescriptorStart,
+  UINT iDiffuseSlot,
+  UINT iNormalSlot,
+  UINT iSpecularSlot,
+  void *pUserContext
+) {
+
+  ULONG chunkIndex;
+
+  auto pSample = reinterpret_cast<MultithreadedRenderingSample *>(pUserContext);
+
+// Skip the task which is not in current thread slot. 
+ if(pSample->IsMultithreadedPerChunk()) {
+   chunkIndex = pSample->GetCurrentChunkThreadIndex() + 1;
+   if ((pSample->IncrementCurrentChunkThreadDrawcallIndex() % (ULONG)pSample->m_uNumberOfChunkThreads) == chunkIndex) {
+     pMesh->RenderMesh(
+       iMesh,  
+       bAdjacent,
+       pd3dCommandList,
+       hDescriptorStart,
+       iDiffuseSlot,
+       iNormalSlot,
+       iSpecularSlot);
+   }
+  } else {
+    pMesh->RenderMesh(
+      iMesh,
+      bAdjacent,
+      pd3dCommandList,
+      hDescriptorStart,
+      iDiffuseSlot,
+      iNormalSlot,
+      iSpecularSlot);
+  }
 }
 
 void MultithreadedRenderingSample::RenderScene(ID3D12GraphicsCommandList *pCommandList,
                                                const SceneParamsStatic *pSceneParamsStatic,
                                                const SceneParamsDynamic *pSceneParamsDynamic) {
 
-  m_pd3dCommandList->SetPipelineState(pSceneParamsStatic->pPipelineStateTuple->PSO.Get());
-  m_pd3dCommandList->SetGraphicsRootSignature(pSceneParamsStatic->pPipelineStateTuple->RootSignature.Get());
-  m_pd3dCommandList->SetDescriptorHeaps(1, m_pModelDescriptorHeap.GetAddressOf());
+  D3D12_CONSTANT_BUFFER_VIEW_DESC CBV;
 
-  m_pd3dCommandList->RSSetViewports(1, pSceneParamsStatic->pViewport);
+  pCommandList->SetPipelineState(pSceneParamsStatic->pPipelineStateTuple->PSO.Get());
+  pCommandList->SetGraphicsRootSignature(pSceneParamsStatic->pPipelineStateTuple->RootSignature.Get());
+  pCommandList->SetDescriptorHeaps(1, m_pModelDescriptorHeap.GetAddressOf());
 
-  D3D12_RECT scissorRect{(LONG)pSceneParamsStatic->pViewport->TopLeftX, (LONG)pSceneParamsStatic->pViewport->TopLeftY,
-                         (LONG)(pSceneParamsStatic->pViewport->TopLeftX + pSceneParamsStatic->pViewport->Width),
-                         (LONG)(pSceneParamsStatic->pViewport->TopLeftY + pSceneParamsStatic->pViewport->Height)};
-                         m_pd3dCommandList->RSSetScissorRects(1, &scissorRect);
+  pCommandList->RSSetViewports(1, &pSceneParamsStatic->Viewport);
+  pCommandList->RSSetScissorRects(1, &pSceneParamsStatic->ScissorRect);
 
-  if (!pSceneParamsStatic->bRenderShadow) {
-    // Shadow SRVs
-    m_pd3dCommandList->SetGraphicsRootDescriptorTable(5, m_pModelDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+  if (pSceneParamsStatic->RenderCase != SCENE_MT_RENDER_CASE_SHADOW) {
+    pCommandList->SetGraphicsRootDescriptorTable(5, m_pModelDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
   }
 
   CB_PER_SCENE sceneData;
@@ -1058,10 +1271,10 @@ void MultithreadedRenderingSample::RenderScene(ID3D12GraphicsCommandList *pComma
   XMStoreFloat4(&sceneData.m_vAmbientColor, s_vAmbientColor);
   sceneData.m_vTintColor = pSceneParamsStatic->vTintColor;
   sceneData.m_vMirrorPlane = pSceneParamsStatic->vMirrorPlane;
-  pSceneParamsStatic->pConstBufferStack->Push(&sceneData, sizeof(sceneData));
-  m_pd3dCommandList->SetGraphicsRootConstantBufferView(2, pSceneParamsStatic->pConstBufferStack->Top().BufferLocation);
+  pSceneParamsStatic->pConstBufferStack->Push(&sceneData, sizeof(sceneData), &CBV);
+  pCommandList->SetGraphicsRootConstantBufferView(2, CBV.BufferLocation);
 
-  if(!pSceneParamsStatic->bRenderShadow) {
+  if(pSceneParamsStatic->RenderCase != SCENE_MT_RENDER_CASE_SHADOW) {
     CB_PER_LIGHT lightData;
     for (int iLight = 0; iLight < s_iNumLights; ++iLight) {
       XMVECTOR vLightPos = XMVectorSetW(g_vLightPos[iLight], 1.0f);
@@ -1077,23 +1290,73 @@ void MultithreadedRenderingSample::RenderScene(ID3D12GraphicsCommandList *pComma
           XMFLOAT4(g_fLightFalloffDistEnd[iLight], g_fLightFalloffDistRange[iLight], g_fLightFalloffCosAngleEnd[iLight],
                   g_fLightFalloffCosAngleRange[iLight]);
     }
-    pSceneParamsStatic->pConstBufferStack->Push(&lightData, sizeof(lightData));
-    m_pd3dCommandList->SetGraphicsRootConstantBufferView(1, pSceneParamsStatic->pConstBufferStack->Top().BufferLocation);
+    pSceneParamsStatic->pConstBufferStack->Push(&lightData, sizeof(lightData), &CBV);
+    pCommandList->SetGraphicsRootConstantBufferView(1, CBV.BufferLocation);
   }
 
   CB_PER_OBJECT objData;
   XMStoreFloat4x4(&objData.m_mWorld, XMMatrixIdentity());
   XMStoreFloat4(&objData.m_vObjectColor, Colors::White);
-  pSceneParamsStatic->pConstBufferStack->Push(&objData, sizeof(objData));
-  m_pd3dCommandList->SetGraphicsRootConstantBufferView(0, pSceneParamsStatic->pConstBufferStack->Top().BufferLocation);
+  pSceneParamsStatic->pConstBufferStack->Push(&objData, sizeof(objData), &CBV);
+  pCommandList->SetGraphicsRootConstantBufferView(0, CBV.BufferLocation);
 
-  m_Model.Render(m_pd3dCommandList,
+  if(IsMultithreadedPerChunk())
+    ResetCurrentChunkThreadDrawcallIndex();
+  m_Model.Render(pCommandList,
     CD3DX12_GPU_DESCRIPTOR_HANDLE(m_pModelDescriptorHeap->GetGPUDescriptorHandleForHeapStart(),
       s_iNumShadows, m_uCbvSrvUavDescriptorSize),
       3, 4);
 }
 
-void MultithreadedRenderingSample::RenderMirror(int iMirror, FrameResources *pFrameResources, ID3D12GraphicsCommandList *pCommandList) {
+void MultithreadedRenderingSample::RenderMirror(int iMirror, FrameResources *pFrameResources) {
+
+  ID3D12GraphicsCommandList *pCommandList;
+  int chunkIndex = -1;
+
+  if (IsMultithreadedPerScene()) {
+    pCommandList = pFrameResources->MirrorCommandLists[iMirror].Get();
+
+    pFrameResources->MirrorCommandAllocators[iMirror]->Reset();
+    pCommandList->Reset(pFrameResources->MirrorCommandAllocators[iMirror].Get(), nullptr);
+  } else if(IsMultithreadedPerChunk()) {
+    chunkIndex = GetCurrentChunkThreadIndex();
+
+    if(chunkIndex < 0) {
+      pCommandList = m_pd3dCommandList;
+    } else {
+      pCommandList = pFrameResources->ChunkCommandLists[chunkIndex].Get();
+    }
+  } else {
+    pCommandList = m_pd3dCommandList;
+  }
+
+  D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = CurrentBackBufferView();
+  D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = DepthStencilView();
+
+  if (iMirror == 0) {
+    if(chunkIndex < 0) {
+
+      if(!IsMultithreadedPerChunk()) {
+        PrepareNextFrame(pCommandList);
+
+        pCommandList->ClearRenderTargetView(rtvHandle, Colors::MidnightBlue, 0, nullptr);
+        pCommandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0,
+                                            nullptr);
+
+        // Shadow SRVs
+        CD3DX12_RESOURCE_BARRIER shadowBarriers[s_iNumShadows];
+        for(int i = 0; i < s_iNumShadows; ++i) {
+          shadowBarriers[i] = CD3DX12_RESOURCE_BARRIER::Transition(m_aShadowTextures[i].Get(),
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        }
+        pCommandList->ResourceBarrier(s_iNumShadows, shadowBarriers);
+      }
+    }
+  }
+  pCommandList->OMSetRenderTargets(1, &rtvHandle, TRUE, &dsvHandle);
+  pCommandList->RSSetViewports(1, &m_ScreenViewport);
+  pCommandList->RSSetScissorRects(1, &m_ScissorRect); // Optimize this to a samll scissor rect.
 
   XMVECTOR vEyePt;
   XMMATRIX matViewProj;
@@ -1112,64 +1375,70 @@ void MultithreadedRenderingSample::RenderMirror(int iMirror, FrameResources *pFr
   XMVECTOR vMirrorPlane = XMLoadFloat4(&m_aMirrorPlanes[iMirror]);
 
   // Test for back-facing mirror
-  if(XMVectorGetX(XMPlaneDotCoord(vMirrorPlane, vEyePt)) < 0.0f)
+  if(XMVectorGetX(XMPlaneDotCoord(vMirrorPlane, vEyePt)) < 0.0f) {
+    if(IsMultithreadedPerScene())
+      pCommandList->Close();
     return;
+  }
 
   XMMATRIX matReflect = XMMatrixReflect(vMirrorPlane);
 
   UINT sindex = iMirror % 8;
   UINT8 stencilRef = 1 << sindex;
 
-  // Write mirrored area stencil value
-  auto pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_MIRRORED_S0 + sindex];
-  pCommandList->SetPipelineState(pPipelineStateTuple->PSO.Get());
-  pCommandList->SetGraphicsRootSignature(pPipelineStateTuple->RootSignature.Get());
-  pCommandList->OMSetStencilRef(stencilRef);
-
+  auto pUploadBufferStack = &pFrameResources->ConstBufferStack;
   D3D12_CONSTANT_BUFFER_VIEW_DESC objCBV, sceneCBV;
   CB_PER_OBJECT objData;
   CB_PER_SCENE sceneData;
+  PipelineStateTuple *pPipelineStateTuple;
 
-  XMStoreFloat4x4(&objData.m_mWorld, XMMatrixTranspose(XMLoadFloat4x4(&m_aMirrorWorldMatrices[iMirror])));
-  XMStoreFloat4x4(&sceneData.m_mViewProj, XMMatrixTranspose(matViewProj));
-  pFrameResources->ConstBufferStack.Push(&objData, sizeof(objData));
-  objCBV = pFrameResources->ConstBufferStack.Top();
-  pFrameResources->ConstBufferStack.Push(&sceneData, sizeof(sceneData));
-  sceneCBV = pFrameResources->ConstBufferStack.Top();
-  pCommandList->SetGraphicsRootConstantBufferView(0, objCBV.BufferLocation);
-  pCommandList->SetGraphicsRootConstantBufferView(2, sceneCBV.BufferLocation);
+  // Write mirrored area stencil value
+  if(chunkIndex < 0) {
+    pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_MIRRORED_S0 + sindex];
 
-  pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-  pCommandList->IASetVertexBuffers(0, 1, &m_aMirrorVBVs[iMirror]);
-  pCommandList->DrawInstanced(4, 1, 0, 0);
+    pCommandList->SetPipelineState(pPipelineStateTuple->PSO.Get());
+    pCommandList->SetGraphicsRootSignature(pPipelineStateTuple->RootSignature.Get());
+    pCommandList->OMSetStencilRef(stencilRef);
 
-  // Clear depth value in stencil area
-  pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_MIRRORED_CLEAR_DEPTH_S0 + sindex];
-  pCommandList->SetPipelineState(pPipelineStateTuple->PSO.Get());
-  pCommandList->SetGraphicsRootSignature(pPipelineStateTuple->RootSignature.Get());
-  pCommandList->OMSetStencilRef(stencilRef);
+    XMStoreFloat4x4(&objData.m_mWorld, XMMatrixTranspose(XMLoadFloat4x4(&m_aMirrorWorldMatrices[iMirror])));
+    XMStoreFloat4x4(&sceneData.m_mViewProj, XMMatrixTranspose(matViewProj));
+    pUploadBufferStack->Push(&objData, sizeof(objData), &objCBV);
+    pUploadBufferStack->Push(&sceneData, sizeof(sceneData), &sceneCBV);
+    pCommandList->SetGraphicsRootConstantBufferView(0, objCBV.BufferLocation);
+    pCommandList->SetGraphicsRootConstantBufferView(2, sceneCBV.BufferLocation);
 
-  sceneData.m_mViewProj._31 = sceneData.m_mViewProj._41;
-  sceneData.m_mViewProj._32 = sceneData.m_mViewProj._42;
-  sceneData.m_mViewProj._33 = sceneData.m_mViewProj._43;
-  sceneData.m_mViewProj._34 = sceneData.m_mViewProj._44;
-  pFrameResources->ConstBufferStack.Push(&sceneData, sizeof(sceneData));
-  sceneCBV = pFrameResources->ConstBufferStack.Top();
-  pCommandList->SetGraphicsRootConstantBufferView(0, objCBV.BufferLocation);
-  pCommandList->SetGraphicsRootConstantBufferView(2, sceneCBV.BufferLocation);
+    pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    pCommandList->IASetVertexBuffers(0, 1, &m_aMirrorVBVs[iMirror]);
+    pCommandList->DrawInstanced(4, 1, 0, 0);
 
-  pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-  pCommandList->IASetVertexBuffers(0, 1, &m_aMirrorVBVs[iMirror]);
-  pCommandList->DrawInstanced(4, 1, 0, 0);
+    // Clear depth value in stencil area
+    pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_MIRRORED_CLEAR_DEPTH_S0 + sindex];
+    pCommandList->SetPipelineState(pPipelineStateTuple->PSO.Get());
+    pCommandList->SetGraphicsRootSignature(pPipelineStateTuple->RootSignature.Get());
+    pCommandList->OMSetStencilRef(stencilRef);
+
+    sceneData.m_mViewProj._31 = sceneData.m_mViewProj._41;
+    sceneData.m_mViewProj._32 = sceneData.m_mViewProj._42;
+    sceneData.m_mViewProj._33 = sceneData.m_mViewProj._43;
+    sceneData.m_mViewProj._34 = sceneData.m_mViewProj._44;
+    pUploadBufferStack->Push(&sceneData, sizeof(sceneData), &sceneCBV);
+    pCommandList->SetGraphicsRootConstantBufferView(0, objCBV.BufferLocation);
+    pCommandList->SetGraphicsRootConstantBufferView(2, sceneCBV.BufferLocation);
+
+    pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    pCommandList->IASetVertexBuffers(0, 1, &m_aMirrorVBVs[iMirror]);
+    pCommandList->DrawInstanced(4, 1, 0, 0);
+  }
 
   SceneParamsStatic staticParams = {};
   SceneParamsDynamic dynamicParams = {};
 
   staticParams.hDepthStencilView = DepthStencilView();
   staticParams.hRenderTargetView = CurrentBackBufferView();
-  staticParams.pConstBufferStack = &pFrameResources->ConstBufferStack;
+  staticParams.pConstBufferStack = pUploadBufferStack;
   staticParams.pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_MIRRORED_RENDERING_S0 + iMirror];
-  staticParams.pViewport = &m_ScreenViewport;
+  staticParams.Viewport = m_ScreenViewport;
+  staticParams.ScissorRect = m_ScissorRect;
   staticParams.uStencilRef = stencilRef;
   staticParams.vMirrorPlane = m_aMirrorPlanes[iMirror];
   XMStoreFloat4(&staticParams.vTintColor, s_vMirrorTint);
@@ -1179,73 +1448,87 @@ void MultithreadedRenderingSample::RenderMirror(int iMirror, FrameResources *pFr
   RenderScene(pCommandList, &staticParams, &dynamicParams);
 
   // Clear stencil value and overwrite depth value of the mirror
-  pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_RENDERING_MIRROR_S0 + sindex];
-  pCommandList->SetPipelineState(pPipelineStateTuple->PSO.Get());
-  pCommandList->SetGraphicsRootSignature(pPipelineStateTuple->RootSignature.Get());
-  pCommandList->OMSetStencilRef(stencilRef);
+  if(!IsMultithreadedPerChunk() || chunkIndex == m_uNumberOfChunkThreads - 2) {
+    pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_RENDERING_MIRROR_S0 + sindex];
+    pCommandList->SetPipelineState(pPipelineStateTuple->PSO.Get());
+    pCommandList->SetGraphicsRootSignature(pPipelineStateTuple->RootSignature.Get());
+    pCommandList->OMSetStencilRef(stencilRef);
 
-  XMStoreFloat4x4(&sceneData.m_mViewProj, XMMatrixTranspose(matViewProj));
-  pFrameResources->ConstBufferStack.Push(&sceneData, sizeof(sceneData));
-  sceneCBV = pFrameResources->ConstBufferStack.Top();
-  pCommandList->SetGraphicsRootConstantBufferView(0, objCBV.BufferLocation);
-  pCommandList->SetGraphicsRootConstantBufferView(2, sceneCBV.BufferLocation);
-
-  pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-  pCommandList->IASetVertexBuffers(0, 1, &m_aMirrorVBVs[iMirror]);
-  pCommandList->DrawInstanced(4, 1, 0, 0);
-}
-
-static VOID CALLBACK _PerSceneRenderDeferredProc(
-  _Inout_     PTP_CALLBACK_INSTANCE Instance,
-  _Inout_opt_ PVOID                 Context,
-  _Inout_     PTP_WORK              Work
-) {
-
-}
-
-static VOID CALLBACK _PerChunkRenderDeferredProc(
-  _Inout_     PTP_CALLBACK_INSTANCE Instance,
-  _Inout_opt_ PVOID                 Context,
-  _Inout_     PTP_WORK              Work
-) {
-
-}
-
-void MultithreadedRenderingSample::OnRenderFrame(float fTime, float fElapsed) {
-
-  HRESULT hr;
-  auto pFrameResources = &m_aFrameResources[m_iFrameIndex];
-
-  V(pFrameResources->CommandAllocator->Reset());
-  V(m_pd3dCommandList->Reset(pFrameResources->CommandAllocator.Get(), nullptr));
-
-  SceneParamsStatic staticParamsShadow = {};
-  SceneParamsDynamic dynamicParamsShadow = {};
-
-  for(int i = 0; i < s_iNumShadows; ++i) {
-    staticParamsShadow.bRenderShadow = TRUE;
-    staticParamsShadow.pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_SHADOW];
-    staticParamsShadow.hDepthStencilView = CD3DX12_CPU_DESCRIPTOR_HANDLE(
-      m_pDSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), i+1, m_uDsvDescriptorSize
-    );
-    staticParamsShadow.pShadowTexture = m_aShadowTextures[i].Get();
-    staticParamsShadow.pConstBufferStack = &pFrameResources->ConstBufferStack;
-    staticParamsShadow.pViewport = &m_aShadowViewport;
-
-    XMStoreFloat4x4(&dynamicParamsShadow.matViewProj, CalcLightViewProj(i, FALSE));
-
-    m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_aShadowTextures[i].Get(),
-      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE));
-    m_pd3dCommandList->ClearDepthStencilView(staticParamsShadow.hDepthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0, 0, 0, nullptr);
-    m_pd3dCommandList->OMSetRenderTargets(0, nullptr, FALSE, &staticParamsShadow.hDepthStencilView);
-
-    RenderScene(m_pd3dCommandList, &staticParamsShadow, &dynamicParamsShadow);
-
-    m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_aShadowTextures[i].Get(),
-      D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+    XMStoreFloat4x4(&sceneData.m_mViewProj, XMMatrixTranspose(matViewProj));
+    pUploadBufferStack->Push(&objData, sizeof(objData), &objCBV);
+    pUploadBufferStack->Push(&sceneData, sizeof(sceneData), &sceneCBV);
+    pCommandList->SetGraphicsRootConstantBufferView(0, objCBV.BufferLocation);
+    pCommandList->SetGraphicsRootConstantBufferView(2, sceneCBV.BufferLocation);
+    pCommandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    pCommandList->IASetVertexBuffers(0, 1, &m_aMirrorVBVs[iMirror]);
+    pCommandList->DrawInstanced(4, 1, 0, 0);
   }
 
-  PrepareNextFrame();
+  if (IsMultithreadedPerScene()) {
+    // EndRenderFrame(pCommandList);
+    pCommandList->Close();
+  }
+}
+
+void MultithreadedRenderingSample::RenderShadow(int iShadow, FrameResources *pFrameResources) {
+
+  SceneParamsStatic shadowStaticParams = {};
+  SceneParamsDynamic shadowDynamicParams = {};
+  auto pUploadBufferStack = &pFrameResources->ConstBufferStack;
+
+  shadowStaticParams.RenderCase = SCENE_MT_RENDER_CASE_SHADOW;
+  shadowStaticParams.pPipelineStateTuple = &m_aPipelineLib[NAMED_PIPELINE_INDEX_SHADOW];
+  shadowStaticParams.hDepthStencilView = CD3DX12_CPU_DESCRIPTOR_HANDLE(
+    m_pDSVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(), iShadow+1, m_uDsvDescriptorSize
+  );
+  shadowStaticParams.pShadowTexture = m_aShadowTextures[iShadow].Get();
+  shadowStaticParams.pConstBufferStack = pUploadBufferStack;
+  shadowStaticParams.Viewport = m_aShadowViewport;
+  shadowStaticParams.ScissorRect = {
+    (LONG)m_aShadowViewport.TopLeftX,
+    (LONG)m_aShadowViewport.TopLeftY,
+    (LONG)m_aShadowViewport.TopLeftX + (LONG)m_aShadowViewport.Width,
+    (LONG)m_aShadowViewport.TopLeftY + (LONG)m_aShadowViewport.Height,
+  };
+
+  XMStoreFloat4x4(&shadowDynamicParams.matViewProj, CalcLightViewProj(iShadow, FALSE));
+
+  ID3D12GraphicsCommandList *pCommandList;
+  int chunkIndex = -1;
+
+  if(IsMultithreadedPerScene()) {
+    pCommandList = pFrameResources->ShadowCommandLists[iShadow].Get();
+
+    pFrameResources->ShadowCommandAllocators[iShadow]->Reset();
+    pCommandList->Reset(pFrameResources->ShadowCommandAllocators[iShadow].Get(), nullptr);
+  } else if(IsMultithreadedPerChunk()) {
+
+    chunkIndex = GetCurrentChunkThreadIndex();
+    if(chunkIndex < 0)
+      // Main thread
+      pCommandList = m_pd3dCommandList;
+    else
+      pCommandList = pFrameResources->ChunkCommandLists[chunkIndex].Get();
+  } else {
+    pCommandList = m_pd3dCommandList;
+  }
+
+  if(chunkIndex < 0) {
+    pCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(shadowStaticParams.pShadowTexture,
+                                                                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                                          D3D12_RESOURCE_STATE_DEPTH_WRITE));
+    pCommandList->ClearDepthStencilView(shadowStaticParams.hDepthStencilView, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
+  }
+
+  pCommandList->OMSetRenderTargets(0, nullptr, FALSE, &shadowStaticParams.hDepthStencilView);
+
+  RenderScene(pCommandList, &shadowStaticParams, &shadowDynamicParams);
+
+  if(IsMultithreadedPerScene())
+    pCommandList->Close();
+}
+
+void MultithreadedRenderingSample::RenderSceneDirect(FrameResources *pFrameResources) {
 
   SceneParamsStatic staticParamsDirect = {};
   SceneParamsDynamic dynamicParamsDirect = {};
@@ -1254,7 +1537,8 @@ void MultithreadedRenderingSample::OnRenderFrame(float fTime, float fElapsed) {
   staticParamsDirect.hRenderTargetView = CurrentBackBufferView();
   staticParamsDirect.hDepthStencilView = DepthStencilView();
   staticParamsDirect.pConstBufferStack = &pFrameResources->ConstBufferStack;
-  staticParamsDirect.pViewport = &m_ScreenViewport;
+  staticParamsDirect.Viewport =  m_ScreenViewport;
+  staticParamsDirect.ScissorRect = m_ScissorRect;
   XMStoreFloat4(&staticParamsDirect.vMirrorPlane, g_XMZero);
   XMStoreFloat4(&staticParamsDirect.vTintColor, Colors::White);
 
@@ -1265,29 +1549,288 @@ void MultithreadedRenderingSample::OnRenderFrame(float fTime, float fElapsed) {
 #endif
     XMStoreFloat4x4(&dynamicParamsDirect.matViewProj, m_Camera.GetViewMatrix() * m_Camera.GetProjMatrix());
 
-  m_pd3dCommandList->ClearRenderTargetView(staticParamsDirect.hRenderTargetView, Colors::MidnightBlue, 0, nullptr);
-  m_pd3dCommandList->ClearDepthStencilView(staticParamsDirect.hDepthStencilView, D3D12_CLEAR_FLAG_DEPTH|D3D12_CLEAR_FLAG_STENCIL,
-    1.0f, 0, 0, nullptr);
-  m_pd3dCommandList->OMSetRenderTargets(1, &staticParamsDirect.hRenderTargetView, TRUE, &staticParamsDirect.hDepthStencilView);
-  m_pd3dCommandList->RSSetViewports(1, &m_ScreenViewport);
-  m_pd3dCommandList->RSSetScissorRects(1, &m_ScissorRect);
+  ID3D12GraphicsCommandList *pCommandList;
 
-  for(int i = 0; i < s_iNumMirrors; ++i) {
-    RenderMirror(i, pFrameResources, m_pd3dCommandList);
+  if(IsMultithreadedPerChunk()) {
+    int chunkIndex = GetCurrentChunkThreadIndex();
+
+    if(chunkIndex < 0)
+      pCommandList = m_pd3dCommandList;
+    else
+      pCommandList = pFrameResources->ChunkCommandLists[chunkIndex].Get();
+  } else {
+    pCommandList = m_pd3dCommandList;
   }
 
-  RenderScene(m_pd3dCommandList, &staticParamsDirect, &dynamicParamsDirect);
+  pCommandList->OMSetRenderTargets(1, &CurrentBackBufferView(), TRUE, &DepthStencilView());
 
-  ImGuiInteractor::OnRender(m_pd3dDevice, m_pd3dCommandList);
+  RenderScene(pCommandList, &staticParamsDirect, &dynamicParamsDirect);
+}
 
-  EndRenderFrame();
+void MultithreadedRenderingSample::OnPerChunkRenderDeferred(int chunkIndex, FrameResources* const* ppFrameResources) {
 
-  m_pd3dCommandList->Close();
-  m_pd3dCommandQueue->ExecuteCommandLists(1, CommandListCast(&m_pd3dCommandList));
+  HRESULT hr;
+  FrameResources* volatile pFrameResources;
+  ID3D12GraphicsCommandList *pCommandList;
+  ID3D12CommandAllocator *pCommandAllocator;
+  UINT i;
+  ID3D12CommandList *cmdLists[MAXIMUM_WAIT_OBJECTS + 1];
+  HANDLE hPassBeginEvent;
+  HANDLE hPassEndEvent;
+  HANDLE aPassBeginEvents[MAXIMUM_WAIT_OBJECTS];
+  HANDLE aPassEndEvents[MAXIMUM_WAIT_OBJECTS];
+
+  if (chunkIndex < 0) {
+
+    pFrameResources = *ppFrameResources;
+
+    cmdLists[0] = m_pd3dCommandList;
+    for (i = 1; i < m_uNumberOfChunkThreads; ++i)
+      cmdLists[i] = pFrameResources->ChunkCommandLists[i - 1].Get();
+
+    pCommandList = m_pd3dCommandList;
+    pCommandAllocator = pFrameResources->CommandAllocator.Get();
+
+    for(i = 1; i < m_uNumberOfChunkThreads; ++i) {
+      m_aChunkThreadArgs[i-1].pFrameResources = pFrameResources;
+      aPassBeginEvents[i-1] = m_aChunkThreadArgs[i-1].PassBeginEvent;
+      aPassEndEvents[i-1] = m_aChunkThreadArgs[i-1].PassEndEvent;
+      SetEvent(aPassBeginEvents[i-1]);
+    }
+
+    if(m_lShowdownChunkThreads)
+      return;
+
+  } else {
+    hPassBeginEvent = chunkIndex < 0 ? nullptr : m_aChunkThreadArgs[chunkIndex].PassBeginEvent;
+    hPassEndEvent = chunkIndex < 0 ? nullptr : m_aChunkThreadArgs[chunkIndex].PassEndEvent;
+
+    WaitForSingleObject(hPassBeginEvent, INFINITE);
+    if (m_lShowdownChunkThreads)
+      return;
+
+    // This line can not be optimized.
+    pFrameResources = *ppFrameResources;
+
+    pCommandList = pFrameResources->ChunkCommandLists[chunkIndex].Get();
+    pCommandAllocator = pFrameResources->ChunkCommandAllocators[chunkIndex].Get();
+  }
+
+  // Reset command allocators.
+  V(pCommandAllocator->Reset());
+
+  for (int iShadow = 0; iShadow < s_iNumShadows; ++iShadow) {
+
+    if(chunkIndex < 0) {
+      for(i = 1; i < m_uNumberOfChunkThreads; ++i) {
+        SetEvent(aPassBeginEvents[i-1]);
+      }
+    } else {
+      WaitForSingleObject(hPassBeginEvent, INFINITE);
+    }
+
+    V(pCommandList->Reset(pCommandAllocator, nullptr));
+
+    RenderShadow(iShadow, pFrameResources);
+
+    pCommandList->Close();
+
+    // Wait for shadow pass complete
+    if(chunkIndex < 0) {
+      WaitForMultipleObjects(m_uNumberOfChunkThreads - 1, aPassEndEvents, TRUE, INFINITE);
+      m_pd3dCommandQueue->ExecuteCommandLists(m_uNumberOfChunkThreads, cmdLists);
+    } else {
+      SetEvent(hPassEndEvent);
+    }
+  }
+
+  for (int iMirror = 0; iMirror < s_iNumMirrors; ++iMirror) {
+
+    if (chunkIndex < 0) {
+
+      // Reset command list to restart record commands
+      pCommandList->Reset(pCommandAllocator, nullptr);
+
+      if(iMirror == 0) {
+        PrepareNextFrame(pCommandList);
+
+        pCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::MidnightBlue, 0, nullptr);
+        pCommandList->ClearDepthStencilView(DepthStencilView(), D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, 1.0f, 0, 0,
+                                            nullptr);
+
+        // Shadow SRVs
+        CD3DX12_RESOURCE_BARRIER shadowBarriers[s_iNumShadows];
+        for(int i = 0; i < s_iNumShadows; ++i) {
+          shadowBarriers[i] = CD3DX12_RESOURCE_BARRIER::Transition(m_aShadowTextures[i].Get(),
+            D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        }
+        pCommandList->ResourceBarrier(s_iNumShadows, shadowBarriers);
+      }
+
+      for (i = 1; i < m_uNumberOfChunkThreads; ++i) {
+        SetEvent(aPassBeginEvents[i - 1]);
+      }
+    } else {
+      WaitForSingleObject(hPassBeginEvent, INFINITE);
+
+      // Reset command list to restart record commands
+      pCommandList->Reset(pCommandAllocator, nullptr);
+    }
+
+    RenderMirror(iMirror, pFrameResources);
+
+    pCommandList->Close();
+
+    // Wait for mirror pass complete
+    if(chunkIndex < 0) {
+      WaitForMultipleObjects(m_uNumberOfChunkThreads - 1, aPassEndEvents, TRUE, INFINITE);
+      m_pd3dCommandQueue->ExecuteCommandLists(m_uNumberOfChunkThreads, cmdLists);
+    } else {
+      SetEvent(hPassEndEvent);
+    }
+  }
+
+  if (chunkIndex < 0) {
+    for (i = 1; i < m_uNumberOfChunkThreads; ++i) {
+      SetEvent(aPassBeginEvents[i - 1]);
+    }
+  } else {
+    WaitForSingleObject(hPassBeginEvent, INFINITE);
+  }
+
+  pCommandList->Reset(pCommandAllocator, nullptr);
+
+  RenderSceneDirect(pFrameResources);
+
+  if(chunkIndex == m_uNumberOfChunkThreads - 2) {
+    ImGuiInteractor::OnRender(m_pd3dDevice, pCommandList);
+    EndRenderFrame(pCommandList);
+  }
+
+  pCommandList->Close();
+
+  // Wait for mirror pass complete
+  if(chunkIndex < 0) {
+    WaitForMultipleObjects(m_uNumberOfChunkThreads - 1, aPassEndEvents, TRUE, INFINITE);
+    m_pd3dCommandQueue->ExecuteCommandLists(m_uNumberOfChunkThreads, cmdLists);
+  } else {
+    SetEvent(hPassEndEvent);
+  }
+}
+
+void MultithreadedRenderingSample::OnRenderFrame(float fTime, float fElapsed) {
+
+  HRESULT hr;
+  auto pFrameResources = &m_aFrameResources[m_iFrameIndex];
+
+  if (IsMultithreadedPerScene()) {
+
+    for (int i = 0; i < s_iNumShadows; ++i) {
+      m_aShadowWorkQueueParams[i].pFrameResources = pFrameResources;
+      SubmitThreadpoolWork(m_aShadowWorkQueuePool[i]);
+    }
+
+    for (int i = 0; i < s_iNumMirrors; ++i) {
+      m_aMirrorWorkQueuePoolParams[i].pFrameResources = pFrameResources;
+      SubmitThreadpoolWork(m_aMirrorWorkQueuePool[i]);
+    }
+
+    V(pFrameResources->CommandAllocator->Reset());
+    V(m_pd3dCommandList->Reset(pFrameResources->CommandAllocator.Get(), nullptr));
+
+    RenderSceneDirect(pFrameResources);
+
+    ImGuiInteractor::OnRender(m_pd3dDevice, m_pd3dCommandList);
+
+    EndRenderFrame();
+
+    m_pd3dCommandList->Close();
+
+    static_assert(s_iNumShadows + s_iNumMirrors <= MAXIMUM_WAIT_OBJECTS, "Scene number per frame must be less than 64");
+
+    HANDLE finEvents[s_iNumShadows + s_iNumMirrors];
+    ID3D12CommandList *cmdLists[s_iNumMirrors + s_iNumMirrors + 1];
+    int i, j = 0;
+
+    for(i = 0; i < s_iNumShadows; ++i, ++j) {
+      finEvents[j] = m_aShadowWorkQueueParams[i].CompletionEvent;
+      cmdLists[j] = pFrameResources->ShadowCommandLists[i].Get();
+    }
+    for(i = 0; i < s_iNumMirrors; ++i, ++j) {
+      finEvents[j] = m_aMirrorWorkQueuePoolParams[i].CompletionEvent;
+      cmdLists[j] = pFrameResources->MirrorCommandLists[i].Get();
+    }
+    cmdLists[j] = m_pd3dCommandList;
+
+    WaitForMultipleObjects(j, finEvents, TRUE, INFINITE);
+    m_pd3dCommandQueue->ExecuteCommandLists(j+1, cmdLists);
+
+  } else if(IsMultithreadedPerChunk()) {
+
+    OnPerChunkRenderDeferred(-1, &pFrameResources);
+
+  } else if (IsSinglethreadedDeferred()) {
+
+    V(pFrameResources->CommandAllocator->Reset());
+    V(m_pd3dCommandList->Reset(pFrameResources->CommandAllocator.Get(), nullptr));
+
+    for (int i = 0; i < s_iNumShadows; ++i)
+      RenderShadow(i, pFrameResources);
+
+    for (int i = 0; i < s_iNumMirrors; ++i)
+      RenderMirror(i, pFrameResources);
+
+    RenderSceneDirect(pFrameResources);
+
+    ImGuiInteractor::OnRender(m_pd3dDevice, m_pd3dCommandList);
+
+    EndRenderFrame();
+
+    m_pd3dCommandList->Close();
+    m_pd3dCommandQueue->ExecuteCommandLists(1, CommandListCast(&m_pd3dCommandList));
+  }
 
   m_pSyncFence->Signal(m_pd3dCommandQueue, &pFrameResources->FencePoint);
 
   Present();
+}
+
+VOID CALLBACK MultithreadedRenderingSample::_PerSceneRenderDeferredProc(
+  _Inout_     PTP_CALLBACK_INSTANCE Instance,
+  _Inout_opt_ PVOID                 Context,
+  _Inout_     PTP_WORK              Work
+) {
+  SCENE_RENDERING_THREAD_PARAMS *pParams = reinterpret_cast<SCENE_RENDERING_THREAD_PARAMS *>(Context);
+  switch(pParams->RenderCase) {
+    case SCENE_MT_RENDER_CASE_SHADOW:
+      pParams->pInstance->RenderShadow(pParams->BatchIndex, pParams->pFrameResources);
+      break;
+    case SCENE_MT_RENDER_CASE_MIRROR_AREA:
+      pParams->pInstance->RenderMirror(pParams->BatchIndex, pParams->pFrameResources);
+      break;
+    default:;
+  }
+
+  SetEvent(pParams->CompletionEvent);
+}
+
+unsigned int WINAPI MultithreadedRenderingSample::_PerChunkRenderDeferredProc(LPVOID pv) {
+
+  auto pParams = reinterpret_cast<CHUNK_RENDERING_THREAD_PARAMS *>(pv);
+  auto pInstance = pParams->pInstance;
+  int chunkIndex = pParams->ChunkIndex;
+
+  TlsSetValue(pInstance->m_dwChunkThreadsLocalSlot, (LPVOID)&pInstance->m_aChunkThreadLocalVars[chunkIndex+1]);
+
+  for(;;) {
+    pInstance->OnPerChunkRenderDeferred(pParams->ChunkIndex, &pParams->pFrameResources);
+
+    if(pInstance->m_lShowdownChunkThreads)
+      break;
+  }
+
+  return 0;
 }
 
 LRESULT MultithreadedRenderingSample::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
@@ -1387,7 +1930,22 @@ static int GetLogicalProcessorCount()
 HRESULT MultithreadedRenderingSample::InitializeRendererThreadpool() {
 
   HRESULT hr = S_OK;
-  int minProcCount = 1, maxProcCount = 64;
+  int minProcCount = 1, maxProcCount = MAXIMUM_WAIT_OBJECTS;
+
+  maxProcCount = GetLogicalProcessorCount() - 1;
+  maxProcCount = std::min(maxProcCount, MAXIMUM_WAIT_OBJECTS);
+  maxProcCount = std::max(maxProcCount, minProcCount);
+
+  m_uNumberOfChunkThreads = maxProcCount + 1; // Include main thread
+
+  ZeroMemory(m_aShadowWorkQueuePool, sizeof(m_aShadowWorkQueuePool));
+  ZeroMemory(m_aShadowWorkQueueParams, sizeof(m_aShadowWorkQueueParams));
+  ZeroMemory(m_aMirrorWorkQueuePool, sizeof(m_aMirrorWorkQueuePool));
+  ZeroMemory(m_aMirrorWorkQueuePoolParams, sizeof(m_aMirrorWorkQueuePoolParams));
+
+  ZeroMemory(m_aChunkThreads, sizeof(m_aChunkThreads));
+  ZeroMemory(m_aChunkThreadArgs, sizeof(m_aChunkThreadArgs));
+  ZeroMemory(m_aChunkThreadLocalVars, sizeof(m_aChunkThreadLocalVars));
 
   m_pThreadpool = CreateThreadpool(nullptr);
   m_pCleanupGroup = CreateThreadpoolCleanupGroup();
@@ -1408,31 +1966,73 @@ HRESULT MultithreadedRenderingSample::InitializeRendererThreadpool() {
   SetThreadpoolCallbackPool(&m_CallbackEnv, m_pThreadpool);
   SetThreadpoolCallbackCleanupGroup(&m_CallbackEnv, m_pCleanupGroup, nullptr);
 
-  maxProcCount = GetLogicalProcessorCount() - 1;
-  maxProcCount = std::max(maxProcCount, minProcCount);
   SetThreadpoolThreadMinimum(m_pThreadpool, minProcCount);
   SetThreadpoolThreadMaximum(m_pThreadpool, maxProcCount);
 
-  m_iWorkQueueMaxParallelCapacity = std::min(64, maxProcCount);
+  for(int i = 0; i < s_iNumShadows; ++i) {
 
-  ZeroMemory(m_aWorkQueueItemArgs, sizeof(m_aWorkQueueItemArgs));
-
-  for(int i = 0; i < m_iWorkQueueMaxParallelCapacity; ++i) {
-
-    m_aSceneWorkQueuePool[i] = CreateThreadpoolWork(_PerSceneRenderDeferredProc,
-      &m_aWorkQueueItemArgs[i], &m_CallbackEnv);
-    if(m_aSceneWorkQueuePool[i] == nullptr) {
+    m_aShadowWorkQueuePool[i] = CreateThreadpoolWork(_PerSceneRenderDeferredProc,
+      &m_aShadowWorkQueueParams[i], &m_CallbackEnv);
+    if(m_aShadowWorkQueuePool[i] == nullptr) {
       return HRESULT_FROM_WIN32(GetLastError());
     }
 
-    m_aChunkWorkQueuePool[i] = CreateThreadpoolWork(_PerChunkRenderDeferredProc,
-      &m_aChunkWorkQueuePool[i], &m_CallbackEnv);
-    if(m_aChunkWorkQueuePool[i] == nullptr) {
+    m_aShadowWorkQueueParams[i].SlotIndex = i;
+    m_aShadowWorkQueueParams[i].pInstance = this;
+    m_aShadowWorkQueueParams[i].BatchIndex = i;
+    m_aShadowWorkQueueParams[i].RenderCase = SCENE_MT_RENDER_CASE_SHADOW;
+    if ((m_aShadowWorkQueueParams[i].CompletionEvent = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS)) ==
+        nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+  }
+
+  for(int i = 0; i < s_iNumMirrors; ++i) {
+
+    m_aMirrorWorkQueuePool[i] = CreateThreadpoolWork(_PerSceneRenderDeferredProc,
+      &m_aMirrorWorkQueuePoolParams[i], &m_CallbackEnv);
+    if(m_aMirrorWorkQueuePool[i] == nullptr) {
       return HRESULT_FROM_WIN32(GetLastError());
     }
 
-    m_aWorkQueueParallelEvents[i] = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
-    if(m_aWorkQueueParallelEvents[i] == nullptr) {
+    m_aMirrorWorkQueuePoolParams[i].SlotIndex = i;
+    m_aMirrorWorkQueuePoolParams[i].pInstance = this;
+    m_aMirrorWorkQueuePoolParams[i].BatchIndex = i;
+    m_aMirrorWorkQueuePoolParams[i].RenderCase = SCENE_MT_RENDER_CASE_MIRROR_AREA;
+    if ((m_aMirrorWorkQueuePoolParams[i].CompletionEvent = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS)) ==
+        nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+  }
+
+  m_dwChunkThreadsLocalSlot = TlsAlloc();
+  if(m_dwChunkThreadsLocalSlot == TLS_OUT_OF_INDEXES) {
+    return HRESULT_FROM_WIN32(GetLastError());
+  }
+
+  // Mark main thread
+  m_aChunkThreadLocalVars[0].ChunkIndex = -1;
+  m_aChunkThreadLocalVars[0].NextDrawcallIndex = 0;
+  TlsSetValue(m_dwChunkThreadsLocalSlot, (LPVOID)&m_aChunkThreadLocalVars[0]);
+
+  for(int i = 0; i < maxProcCount; ++i) {
+
+    if((m_aChunkThreadArgs[i].PassBeginEvent = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS)) == nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    if((m_aChunkThreadArgs[i].PassEndEvent = CreateEventExW(nullptr, nullptr, 0, EVENT_ALL_ACCESS)) == nullptr) {
+      return HRESULT_FROM_WIN32(GetLastError());
+    }
+
+    m_aChunkThreadArgs[i].pInstance = this;
+    m_aChunkThreadArgs[i].ChunkIndex = i;
+    m_aChunkThreadLocalVars[i+1].ChunkIndex = i;
+    m_aChunkThreadLocalVars[i+1].NextDrawcallIndex = 0;
+
+    m_aChunkThreads[i] = (HANDLE)_beginthreadex(nullptr, 0, MultithreadedRenderingSample::_PerChunkRenderDeferredProc,
+      (void *)&m_aChunkThreadArgs[i], 0, nullptr);
+    if(m_aChunkThreads[i] == nullptr) {
       return HRESULT_FROM_WIN32(GetLastError());
     }
   }

@@ -2,6 +2,8 @@ project(MultithreadedRendering)
 
 set(${PROJECT_NAME}_src_files
   MultithreadedRendering.cpp
+  MultithreadedDXUTMesh.h
+  MultithreadedDXUTMesh.cpp
 )
 
 file(GLOB ${PROJECT_NAME}_shader_files Shaders/*.hlsl)

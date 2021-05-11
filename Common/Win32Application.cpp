@@ -192,7 +192,7 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     LPCREATESTRUCT pCreateStruct = (LPCREATESTRUCT)lp;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)pCreateStruct->lpCreateParams);
     pWndContext = reinterpret_cast<_WindowContext *>(pCreateStruct->lpCreateParams);
-    break;
+    return 0;
   }
     // WM_ACTIVATE is sent when the window is activated or deactivated.
     // We pause the game when the window is deactivated and unpause it
