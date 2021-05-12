@@ -20,6 +20,7 @@ public:
   HRESULT ResizeFrame(int cx, int cy);
 
 protected:
+  void ModifyPreset();
   ///
   /// Check device feature support for a given device.
   /// This entry is used for selecting adapter.
@@ -77,6 +78,11 @@ protected:
 
     /// Vertical Synchronization.
     BOOL VsyncEnabled;
+
+    // Back color buffer SRGB settings
+    // Default is FALSE
+    BOOL SwapChainBackBufferFormatSRGB;
+
   } m_aDeviceConfig;
 
   uint32_t m_uFrameWidth, m_uFrameHeight;

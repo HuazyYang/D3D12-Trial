@@ -57,8 +57,13 @@ HRESULT CDXUTSDKMesh::CreateTextureFromFile(_In_ ResourceUploadBatch *pUploadBat
 
         hr = (DirectX::LoadFromDDSFile(pSrcFile, DDS_FLAGS_NONE, &texMetaData, scratchImage));
         if(SUCCEEDED(hr)) {
+
           V_RETURN(DirectX::PrepareUpload(pUploadBatch->GetDevice(), scratchImage.GetImages(),
                                           scratchImage.GetImageCount(), texMetaData, subres));
+
+          if (bSRGB) {
+            texMetaData.format = MakeSRGB(texMetaData.format);
+          }
           V_RETURN(DirectX::CreateTexture(pUploadBatch->GetDevice(), texMetaData, ppOutputRV));
 
           V_RETURN(pUploadBatch->Enqueue(*ppOutputRV, 0, (UINT)subres.size(), subres.data()));
@@ -68,8 +73,7 @@ HRESULT CDXUTSDKMesh::CreateTextureFromFile(_In_ ResourceUploadBatch *pUploadBat
                                                                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
         }
     } else {
-
-        hr = (DirectX::LoadFromWICFile(pSrcFile, WIC_FLAGS_NONE, &texMetaData, scratchImage));
+        hr = (DirectX::LoadFromWICFile(pSrcFile, bSRGB ? WIC_FLAGS_FORCE_SRGB : WIC_FLAGS_NONE, &texMetaData, scratchImage));
         if(SUCCEEDED(hr)) {
             V_RETURN(DirectX::PrepareUpload(pUploadBatch->GetDevice(), scratchImage.GetImages(), scratchImage.GetImageCount(),
                                             texMetaData, subres));

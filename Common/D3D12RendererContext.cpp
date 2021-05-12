@@ -14,11 +14,6 @@ D3D12RendererContext::D3D12RendererContext()
       m_pd3dDepthStencilBuffer(nullptr),
       m_iCurrentBackBuffer(0), m_ScreenViewport{0, 0, 0, 0, 0, 0}, m_ScissorRect{0, 0, 0, 0} {
 
-
-  // When use sRGB format, back buffer format is different with swap chain format
-  // m_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
-  // m_SwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-
   m_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
   m_SwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
@@ -33,6 +28,8 @@ D3D12RendererContext::D3D12RendererContext()
   m_aDeviceConfig.MsaaQaulityLevel = (1);
   m_aDeviceConfig.MsaaEnabled = (false);
   ///
+
+  m_aDeviceConfig.SwapChainBackBufferFormatSRGB = FALSE;
 
   memset(m_pd3dSwapChainBuffer, 0, sizeof(m_pd3dSwapChainBuffer));
   m_aRTVDefaultClearValue.Format = DXGI_FORMAT_UNKNOWN;
@@ -64,6 +61,18 @@ D3D12RendererContext::~D3D12RendererContext() {
   SAFE_RELEASE(m_pd3dDepthStencilBuffer);
 }
 
+void D3D12RendererContext::ModifyPreset() {
+
+  if(m_aDeviceConfig.SwapChainBackBufferFormatSRGB) {
+    // When use sRGB format, back buffer format is different with swap chain format
+    m_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    m_SwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+  } else {
+    m_BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+    m_SwapChainFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+  }
+}
+
 HRESULT D3D12RendererContext::Initialize(HWND hwnd, int cx, int cy) {
 
   HRESULT hr;
@@ -71,7 +80,9 @@ HRESULT D3D12RendererContext::Initialize(HWND hwnd, int cx, int cy) {
   m_uFrameWidth = cx;
   m_uFrameHeight = cy;
 
-  V_RETURN(CreateDevice());
+  ModifyPreset();
+
+      V_RETURN(CreateDevice());
   V_RETURN(CreateMemAllocator());
   V_RETURN(CreateCommandObjects());
   V_RETURN(CreateSwapChain(hwnd));
