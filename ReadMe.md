@@ -17,7 +17,7 @@ This repos is my experimental(trial) to high performance real time rendering eng
    * Dear ImGui
    * D3D12MemoryAllocator
    * DirectXShaderCompiler
- * Clone [Media]('https://github.com/TaylorSevens/Media) into any level of parent folder of this repos' local copy;
+ * Clone [Media](https://github.com/TaylorSevens/Media) into any level of parent folder of this repos' local copy;
  * Clone [directx-sdk-sample](https://github.com/walbourn/directx-sdk-samples) into any level of parent folder of this repos' local copy. We just need some models and textures in theirs folder, nothing else.
 ## Build steps
  To build debug version, just kick cmake default build procedure;
