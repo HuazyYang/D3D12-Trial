@@ -148,7 +148,9 @@ HRESULT CreateNBodyGravityRendererContextAndInteractor(D3D12RendererContext **pp
   return S_OK;
 }
 
-NBodyGravityApp::NBodyGravityApp() {}
+NBodyGravityApp::NBodyGravityApp() {
+  m_aDeviceConfig.SwapChainBackBufferFormatSRGB = TRUE;
+}
 
 NBodyGravityApp::~NBodyGravityApp() {
   SAFE_RELEASE(m_pParticleDiffuseMap);
@@ -248,9 +250,9 @@ HRESULT NBodyGravityApp::CreateParticleBuffers() {
 
     hr = S_OK;
 
-    m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(),
-                                                                                D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                                                D3D12_RESOURCE_STATE_COPY_DEST));
+    m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(
+                                              m_pParticleBuffer1.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                              D3D12_RESOURCE_STATE_COPY_DEST));
   }
 
   D3D12_SUBRESOURCE_DATA initData;
@@ -260,9 +262,9 @@ HRESULT NBodyGravityApp::CreateParticleBuffers() {
 
   UpdateSubresources<1>(m_pd3dCommandList, m_pParticleBuffer1.Get(), m_pParticleBufferUpload.Get(), 0, 0, 1, &initData);
 
-  m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(),
-                                                                              D3D12_RESOURCE_STATE_COPY_DEST,
-                                                                              D3D12_RESOURCE_STATE_GENERIC_READ));
+  m_pd3dCommandList->ResourceBarrier(
+      1, &CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+                                               D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 
   return hr;
 }
@@ -559,21 +561,12 @@ void NBodyGravityApp::UpdatePaticles(FrameResources *pFrameResources) {
   std::swap(m_hParticleSrvBuffer1, m_hParticleSrvBuffer2);
   std::swap(m_hParticleUavBuffer1, m_hParticleUavBuffer2);
   m_iParticleBuffersSwapState ^= 1;
-
-  D3D12_RESOURCE_BARRIER Barriers[] = {
-      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-                                           D3D12_RESOURCE_STATE_GENERIC_READ),
-      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer2.Get(), D3D12_RESOURCE_STATE_GENERIC_READ,
-                                           D3D12_RESOURCE_STATE_UNORDERED_ACCESS)};
-
-  m_pd3dCommandList->ResourceBarrier(2, Barriers);
 }
 
 void NBodyGravityApp::OnRenderFrame(float fTime, float fElapsedTime) {
   HRESULT hr;
   FrameResources *pFrameResources = &m_FrameResources[m_iCurrentFrameIndex];
   D3D12_GPU_VIRTUAL_ADDRESS cbAddress;
-  UINT cbCBByteSize = d3dUtils::CalcConstantBufferByteSize(sizeof(DrawPassConstants));
 
   V(pFrameResources->CmdListAlloc->Reset());
   V(m_pd3dCommandList->Reset(pFrameResources->CmdListAlloc, m_pCSPSO));
@@ -583,9 +576,15 @@ void NBodyGravityApp::OnRenderFrame(float fTime, float fElapsedTime) {
   UpdatePaticles(pFrameResources);
 
   /// Render the particles.
-  m_pd3dCommandList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(),
-                                                                              D3D12_RESOURCE_STATE_PRESENT,
-                                                                              D3D12_RESOURCE_STATE_RENDER_TARGET));
+  D3D12_RESOURCE_BARRIER Barriers[] = {
+      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer1.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+      CD3DX12_RESOURCE_BARRIER::Transition(m_pParticleBuffer2.Get(), D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                                           D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+      CD3DX12_RESOURCE_BARRIER::Transition(CurrentBackBuffer(), D3D12_RESOURCE_STATE_PRESENT,
+                                           D3D12_RESOURCE_STATE_RENDER_TARGET)};
+
+  m_pd3dCommandList->ResourceBarrier(3, Barriers);
 
   m_pd3dCommandList->ClearRenderTargetView(CurrentBackBufferView(), Colors::Black, 1, &m_ScissorRect);
 
@@ -597,8 +596,7 @@ void NBodyGravityApp::OnRenderFrame(float fTime, float fElapsedTime) {
   m_pd3dCommandList->RSSetViewports(1, &m_ScreenViewport);
   m_pd3dCommandList->RSSetScissorRects(1, &m_ScissorRect);
 
-  cbAddress = FrameResources::DrawParticleCB.GetConstBufferAddress();
-  cbAddress += m_iCurrentFrameIndex * cbCBByteSize;
+  cbAddress = FrameResources::DrawParticleCB.GetConstBufferAddress(m_iCurrentFrameIndex);
 
   m_pd3dCommandList->SetGraphicsRootConstantBufferView(0, cbAddress);
   m_pd3dCommandList->SetGraphicsRootDescriptorTable(1, m_hParticleSrvBuffer1);

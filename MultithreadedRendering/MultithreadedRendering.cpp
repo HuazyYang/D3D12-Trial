@@ -58,7 +58,7 @@ struct MirrorVertex {
 HRESULT CreateMultithreadRenderingRendererAndInteractor(D3D12RendererContext **ppRenderer,
                                                         WindowInteractor **ppInteractor);
 
-int main() {
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE hPrevInst, PWSTR lpszCmdline, int nShowCmd) {
 
   HRESULT hr;
   int ret;
@@ -241,7 +241,7 @@ protected:
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::Begin("Rendering opts", nullptr, ImGuiWindowFlags_NoBackground);
+    ImGui::Begin("Rendering opts", nullptr, ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::RadioButton("ST Def", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_ST);
     ImGui::RadioButton("MT Def/Scene", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_SCENE);
     ImGui::RadioButton("MT Def/Chunk", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_CHUNK);
@@ -814,15 +814,6 @@ HRESULT MultithreadedRenderingSample::CreatePSOs() {
     { nullptr, nullptr }
   };
   ComPtr<ID3D12RootSignature> pRootSignature;
-
-  V(d3dUtils::CompileShaderFromFile(L"Shaders/MultithreadedRendering_VSPS.hlsl", defines, nullptr, "VSMain", "vs_5_0", 0, 0, &pVSBuffer, &pErrorBuffer));
-  if(FAILED(hr)) {
-    DX_TRACE(L"Compile VS error: %S\n", pErrorBuffer ? pErrorBuffer->GetBufferPointer(): "Unknown");
-    return hr;
-  } else if(pErrorBuffer) {
-    DX_TRACE(L"Compile VS warning: %S\n", pErrorBuffer->GetBufferPointer());
-    pErrorBuffer = nullptr;
-  }
 
   V(d3dUtils::CompileShaderFromFile(L"Shaders/MultithreadedRendering_VSPS.hlsl", defines, nullptr, "VSMain", "vs_5_0", 0, 0, &pVSBuffer, &pErrorBuffer));
   if(FAILED(hr)) {

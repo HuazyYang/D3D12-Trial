@@ -18,6 +18,8 @@ public:
   void RenderFrame(float fTime, float fElapsedTime);
   void Destroy();
   HRESULT ResizeFrame(int cx, int cy);
+  HRESULT SetFullscreenMode(BOOL bFullScreen);
+  RECT GetSwapchainContainingOutputDesktopCoordinates() const;
 
 protected:
   void ModifyPreset();
@@ -39,6 +41,7 @@ protected:
   D3D12_CPU_DESCRIPTOR_HANDLE CurrentBackBufferView() const;
   D3D12_CPU_DESCRIPTOR_HANDLE DepthStencilView() const;
 
+  void CheckTearingSupport(IDXGIFactory5 *pFactory);
   HRESULT GetHardwareAdapter(_In_ IDXGIFactory1 *pDXGIFactory, _Out_ IDXGIAdapter1 **ppAdapter);
 
   HRESULT CreateDevice();
@@ -62,30 +65,41 @@ protected:
 
   BOOL IsMsaaEnabled() const;
 
+  // The following configuration must be specified
+  // before Initialize() invokes.
   struct DeviceFeatureConfig {
     // Request decrete Gpu
     BOOL RequestHighPerformanceGpu;
-    /// Device feature level.
+    /// Request device feature level.
     D3D_FEATURE_LEVEL FeatureLevel;
 
-    /// DXR Ray Tracing support.
+    /// Request DXR Ray Tracing support (mandatory)
     BOOL RaytracingEnabled;
 
-    /// MSAA
+    /// Request MSAA (non-mandatory)
     BOOL MsaaEnabled;
     UINT MsaaSampleCount;
     UINT MsaaQaulityLevel;
 
-    /// Vertical Synchronization.
+    /// Vertical Synchronization (non-mandatory)
     BOOL VsyncEnabled;
 
-    // Back color buffer SRGB settings
+    // Back color buffer SRGB settings (mandatory)
     // Default is FALSE
     BOOL SwapChainBackBufferFormatSRGB;
 
   } m_aDeviceConfig;
 
+  // The following settings is mutable when the renderer context
+  // is running
+  struct DeviceRuntimeSettings {
+    // Check whether tearing is support for output
+    BOOL TearingSupport;
+  } m_aDeviceRuntimeSettings;
+
   uint32_t m_uFrameWidth, m_uFrameHeight;
+  // Check whether current render output window is in full screen mode
+  BOOL m_bFullscreenMode;
 
   // Back buffer format.
   DXGI_FORMAT m_BackBufferFormat;

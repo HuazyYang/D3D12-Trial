@@ -24,6 +24,9 @@ public:
   double GetElapsedTime() const;
   double GetFPS() const;
 
+  void ToggleFullscreenWindow(_In_opt_ LPCRECT pDesktopCoordinates);
+  BOOL GetFullscreenState() const;
+
   virtual LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing);
 
 protected:
@@ -37,6 +40,8 @@ protected:
 
   HWND m_hWnd;
   bool m_bEnabled;
+  BOOL m_bFullscreenState;
+  RECT m_aWindowRect;
 
   struct FrameStatistics {
     uint32_t LastFrameCount;

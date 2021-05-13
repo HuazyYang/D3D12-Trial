@@ -4,7 +4,7 @@
 // D3D12RendererContext implementation.
 //
 D3D12RendererContext::D3D12RendererContext()
-    : m_uFrameWidth(800), m_uFrameHeight(600),
+    : m_uFrameWidth(800), m_uFrameHeight(600), m_bFullscreenMode(FALSE),
       m_DepthStencilBufferFormat(DXGI_FORMAT_D24_UNORM_S8_UINT),
       m_pd3dMsaaRenderTargetBuffer(nullptr), m_pDXGIFactory(nullptr), m_pDXGIAdapter(nullptr), m_pd3dDevice(nullptr),
       m_uRtvDescriptorSize(0), m_uDsvDescriptorSize(0), m_uCbvSrvUavDescriptorSize(0),
@@ -30,6 +30,8 @@ D3D12RendererContext::D3D12RendererContext()
   ///
 
   m_aDeviceConfig.SwapChainBackBufferFormatSRGB = FALSE;
+
+  m_aDeviceRuntimeSettings.TearingSupport = FALSE;
 
   memset(m_pd3dSwapChainBuffer, 0, sizeof(m_pd3dSwapChainBuffer));
   m_aRTVDefaultClearValue.Format = DXGI_FORMAT_UNKNOWN;
@@ -82,7 +84,7 @@ HRESULT D3D12RendererContext::Initialize(HWND hwnd, int cx, int cy) {
 
   ModifyPreset();
 
-      V_RETURN(CreateDevice());
+  V_RETURN(CreateDevice());
   V_RETURN(CreateMemAllocator());
   V_RETURN(CreateCommandObjects());
   V_RETURN(CreateSwapChain(hwnd));
@@ -95,6 +97,12 @@ HRESULT D3D12RendererContext::Initialize(HWND hwnd, int cx, int cy) {
 
 void D3D12RendererContext::Destroy() {
   FlushCommandQueue();
+
+  if(m_aDeviceRuntimeSettings.TearingSupport) {
+    // Fullscreen state should always be false before exiting.
+    m_pSwapChain->SetFullscreenState(FALSE, nullptr);
+  }
+
   OnDestroy();
 }
 
@@ -114,9 +122,16 @@ HRESULT D3D12RendererContext::CreateDevice() {
   }
 #endif
 
-  /// Tearing must be enabled.
   V_RETURN(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&m_pDXGIFactory)));
   DX_SetDebugName(m_pDXGIFactory, "DXGIFactory");
+
+  /// Tearing must be enabled.
+  IDXGIFactory5 *pFactory;
+  m_pDXGIFactory->QueryInterface(&pFactory);
+  if(pFactory) {
+    CheckTearingSupport(pFactory);
+    pFactory->Release();
+  }
 
   V_RETURN(GetHardwareAdapter(m_pDXGIFactory, &m_pDXGIAdapter));
 
@@ -196,6 +211,17 @@ HRESULT D3D12RendererContext::GetHardwareAdapter(IDXGIFactory1 *pFactory, IDXGIA
   return *ppAdapter ? S_OK : E_FAIL;
 }
 
+void D3D12RendererContext::CheckTearingSupport(IDXGIFactory5 *pFactory) {
+
+  BOOL allowTearing = FALSE;
+  if (SUCCEEDED(
+          pFactory->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &allowTearing, sizeof(allowTearing)))) {
+    m_aDeviceRuntimeSettings.TearingSupport = allowTearing;
+  } else {
+    m_aDeviceRuntimeSettings.TearingSupport = FALSE;
+  }
+}
+
 HRESULT D3D12RendererContext::CheckDeviceFeatureSupport(ID3D12Device5 *pDevice) {
 
   HRESULT hr = S_OK;
@@ -211,7 +237,7 @@ HRESULT D3D12RendererContext::CheckDeviceFeatureSupport(ID3D12Device5 *pDevice) 
       hr = E_NOTIMPL;
       return hr;
     }
-  };
+  }
 
   /// Check MSAA support.
   if (m_aDeviceConfig.MsaaEnabled) {
@@ -298,13 +324,19 @@ HRESULT D3D12RendererContext::CreateSwapChain(HWND hwnd) {
   dscd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
   dscd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
-  if (!m_aDeviceConfig.VsyncEnabled)
+  if (!m_aDeviceConfig.VsyncEnabled && m_aDeviceRuntimeSettings.TearingSupport)
     dscd.Flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
   V_RETURN(m_pDXGIFactory->CreateSwapChain(m_pd3dCommandQueue, &dscd, &m_pSwapChain));
   DX_SetDebugName(m_pSwapChain, "DXGISwapChain");
 
-  return hr;
+  if (dscd.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) {
+    // When tearing support is enabled we will handle ALT+Enter key presses in the
+    // window message loop rather than let DXGI handle it by calling SetFullscreenState.
+    m_pDXGIFactory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
+  }
+
+    return hr;
 }
 
 UINT D3D12RendererContext::GetExtraRTVDescriptorCount() const { return 0; }
@@ -404,7 +436,10 @@ HRESULT D3D12RendererContext::CreateRtvAndDsvDescriptorHeaps() {
 
 HRESULT D3D12RendererContext::Present() {
   HRESULT hr;
-  V_RETURN(m_pSwapChain->Present(0, m_aDeviceConfig.VsyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING));
+  UINT presentFlags = (!m_aDeviceConfig.VsyncEnabled && m_aDeviceRuntimeSettings.TearingSupport && !m_bFullscreenMode)
+                          ? DXGI_PRESENT_ALLOW_TEARING
+                          : 0;
+  V_RETURN(m_pSwapChain->Present(0, presentFlags));
   m_iCurrentBackBuffer = (m_iCurrentBackBuffer + 1) % s_iSwapChainBufferCount;
   return hr;
 }
@@ -487,6 +522,8 @@ HRESULT D3D12RendererContext::ResizeFrame(int cx, int cy) {
   // Flush before changing any resources.
   FlushCommandQueue();
 
+  // Safe to flush the default command allocator.
+  V_RETURN(m_pd3dDirectCmdAlloc->Reset());
   V_RETURN(m_pd3dCommandList->Reset(m_pd3dDirectCmdAlloc, nullptr));
 
   // Release the previous resources we will be recreating.
@@ -495,6 +532,8 @@ HRESULT D3D12RendererContext::ResizeFrame(int cx, int cy) {
   SAFE_RELEASE(m_pd3dDepthStencilBuffer);
 
   m_pSwapChain->GetDesc(&scDesc);
+
+  m_pSwapChain->GetFullscreenState(&m_bFullscreenMode, nullptr);
 
   // Resize the swap chain.
   V_RETURN(m_pSwapChain->ResizeBuffers(s_iSwapChainBufferCount, m_uFrameWidth, m_uFrameHeight,
@@ -593,6 +632,29 @@ HRESULT D3D12RendererContext::ResizeFrame(int cx, int cy) {
   OnResizeFrame(cx, cy);
 
   return hr;
+}
+
+HRESULT D3D12RendererContext::SetFullscreenMode(BOOL bFullscreen) {
+  HRESULT hr = E_FAIL;
+  if(m_pSwapChain) {
+    // V_RETURN(m_pSwapChain->SetFullscreenState(bFullscreen, nullptr));
+    m_bFullscreenMode = bFullscreen;
+  }
+  return hr;
+}
+
+RECT D3D12RendererContext::GetSwapchainContainingOutputDesktopCoordinates() const {
+
+  IDXGIOutput *pOutput;
+  DXGI_OUTPUT_DESC desc;
+  RECT desktopRect;
+  if(SUCCEEDED(m_pSwapChain->GetContainingOutput(&pOutput)) &&
+    SUCCEEDED(pOutput->GetDesc(&desc))) {
+      desktopRect = desc.DesktopCoordinates;
+  } else {
+    desktopRect = {0, 0, (LONG)m_uFrameWidth, (LONG)m_uFrameHeight};
+  }
+  return desktopRect;
 }
 
 void D3D12RendererContext::Update(float fTime, float fElapsedTime) {

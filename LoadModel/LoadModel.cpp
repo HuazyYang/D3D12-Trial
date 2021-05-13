@@ -98,7 +98,9 @@ HRESULT CreateRendererAndInteractor(D3D12RendererContext **ppRenderer, WindowInt
   return S_OK;
 }
 
-LoadModelSample::LoadModelSample() { this->m_aDeviceConfig.VsyncEnabled = FALSE; }
+LoadModelSample::LoadModelSample() {
+   this->m_aDeviceConfig.SwapChainBackBufferFormatSRGB = TRUE;
+}
 
 HRESULT LoadModelSample::CheckDeviceFeatureSupport(ID3D12Device5 *pDevice) {
   HRESULT hr;

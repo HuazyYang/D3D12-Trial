@@ -1,9 +1,7 @@
-project(MultithreadedRendering)
+project(SubD12 VERSION 0.0.1.0)
 
 set(${PROJECT_NAME}_src_files
-  MultithreadedRendering.cpp
-  MultithreadedDXUTMesh.h
-  MultithreadedDXUTMesh.cpp
+
 )
 
 file(GLOB ${PROJECT_NAME}_shader_files Shaders/*.hlsl)
@@ -12,7 +10,6 @@ add_executable(
   ${PROJECT_NAME}
   ${${PROJECT_NAME}_src_files}
 )
-target_link_options(${PROJECT_NAME} PRIVATE "/SUBSYSTEM:WINDOWS")
 target_link_libraries(
   ${PROJECT_NAME}
   Common

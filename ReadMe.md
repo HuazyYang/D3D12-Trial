@@ -21,4 +21,4 @@ This repos is my experimental(trial) to high performance real time rendering eng
  * Clone [directx-sdk-sample](https://github.com/walbourn/directx-sdk-samples) into any level of parent folder of this repos' local copy. We just need some models and textures in theirs folder, nothing else.
 ## Build steps
  To build debug version, just kick cmake default build procedure;
- To build release version, select cmake variant to Release, the eidtor CmakeCache.txt with the option:`CMAKE_BUILD_TYPE=Release`, then kick off cmake build procedure.
+ To build release version, select cmake variant to Release, then edit CMakeCache.txt with the option:`CMAKE_BUILD_TYPE=Release`, then kick off cmake build procedure.

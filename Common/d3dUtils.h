@@ -2,7 +2,7 @@
 #define __D3D_UTILS_HPP__
 
 // d3d12 common header.
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include <d3d12.h>
 #include <dxcapi.h>
 #include <d3dcompiler.h>

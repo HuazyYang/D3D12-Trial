@@ -12,6 +12,8 @@ WindowInteractor::WindowInteractor() {
   m_FrameStat.LastFrameCount = 0;
   m_FrameStat.TotalFrameCount = 0;
 
+  m_bFullscreenState = FALSE;
+
   Reset();
 }
 
@@ -60,6 +62,57 @@ double WindowInteractor::GetTotalTime() const {
 }
 double WindowInteractor::GetElapsedTime() const {
   return m_GlobalTimer.GetElapsedTime();
+}
+
+void WindowInteractor::ToggleFullscreenWindow(LPCRECT pDesktopCoordinates) {
+
+  LONG windowStyle = WS_OVERLAPPEDWINDOW;
+
+  if(m_bFullscreenState) {
+
+    // Restore the window's attributes and size.
+    SetWindowLong(m_hWnd, GWL_STYLE, windowStyle);
+
+    SetWindowPos(m_hWnd, HWND_NOTOPMOST, m_aWindowRect.left, m_aWindowRect.top,
+                 m_aWindowRect.right - m_aWindowRect.left, m_aWindowRect.bottom - m_aWindowRect.top,
+                 SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
+    ShowWindow(m_hWnd, SW_NORMAL);
+
+  } else {
+    // Save the old window rect so we can restore it when exiting fullscreen mode.
+    GetWindowRect(m_hWnd, &m_aWindowRect);
+
+    // Make the window borderless so that the client area can fill the screen.
+    SetWindowLong(m_hWnd, GWL_STYLE,
+                  windowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
+
+    RECT fullscreenWindowRect;
+
+    if(pDesktopCoordinates) {
+      fullscreenWindowRect = *pDesktopCoordinates;
+    } else {
+      // Get the settings of the primary display
+      DEVMODE devMode = {};
+      devMode.dmSize = sizeof(DEVMODE);
+      EnumDisplaySettings(nullptr, ENUM_CURRENT_SETTINGS, &devMode);
+
+      fullscreenWindowRect = {devMode.dmPosition.x, devMode.dmPosition.y,
+                              devMode.dmPosition.x + static_cast<LONG>(devMode.dmPelsWidth),
+                              devMode.dmPosition.y + static_cast<LONG>(devMode.dmPelsHeight)};
+    }
+
+    SetWindowPos(m_hWnd, HWND_TOPMOST, fullscreenWindowRect.left, fullscreenWindowRect.top, fullscreenWindowRect.right,
+                 fullscreenWindowRect.bottom, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
+    ShowWindow(m_hWnd, SW_MAXIMIZE);
+  }
+
+  m_bFullscreenState ^= 1;
+}
+
+BOOL WindowInteractor::GetFullscreenState() const {
+  return m_bFullscreenState;
 }
 
 LRESULT WindowInteractor::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
@@ -212,6 +265,11 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (wp == SIZE_MINIMIZED) {
       pWndContext->pInteractor->SetPaused(true);
     } else if (wp == SIZE_MAXIMIZED) {
+
+      RECT rect;
+      GetClientRect(hwnd, &rect);
+      cx = rect.right - rect.left;
+      cy = rect.bottom - rect.top;
       pWndContext->pRenderer->ResizeFrame(cx, cy);
     } else if(wp == SIZE_RESTORED && !pWndContext->Resizing) {
       pWndContext->pRenderer->ResizeFrame(cx, cy);
@@ -250,6 +308,11 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (wp == VK_ESCAPE) {
       PostMessage(hwnd, WM_CLOSE, 0, 0);
       return 0;
+    } else if(wp == VK_F11 && pWndContext) {
+      // Toggle fullscreen states.
+      RECT rectDesktop = pWndContext->pRenderer->GetSwapchainContainingOutputDesktopCoordinates();
+      pWndContext->pInteractor->ToggleFullscreenWindow(&rectDesktop);
+      pWndContext->pRenderer->SetFullscreenMode(pWndContext->pInteractor->GetFullscreenState());
     }
     break;
   }
