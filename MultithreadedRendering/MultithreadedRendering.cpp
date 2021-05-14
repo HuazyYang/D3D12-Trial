@@ -267,7 +267,9 @@ protected:
     // Forward declare message handler from imgui_impl_win32.cpp
     extern LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+    BeginInteraction();
     LRESULT ret = ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
+    EndInteraction();
     return ret;
   }
 
@@ -297,6 +299,7 @@ private:
   ImGuiContext *m_pImGuiCtx = nullptr;
   ComPtr<ID3D12DescriptorHeap> m_pImGuiSrvHeap;
 
+protected:
   // UI data
   RENDER_SCHEDULING_OPTIONS m_RenderSchedulingOption = RENDER_SCHEDULING_OPTION_ST;
   BOOL m_bOptmizeMirrorClipSpace = FALSE;
@@ -1205,7 +1208,28 @@ void MultithreadedRenderingSample::OnFrameMoved(float fTime, float fElapsed) {
 
   pFrameResources->ConstBufferStack.Clear();
 
+  RENDER_SCHEDULING_OPTIONS ropts = m_RenderSchedulingOption;
+
   ImGuiInteractor::OnFrameMoved(m_pd3dDevice);
+
+  if(ropts != m_RenderSchedulingOption) {
+    // Fine tune work threads priority
+    if (IsMultithreadedPerScene()) {
+      SetThreadpoolCallbackPriority(&m_CallbackEnv, TP_CALLBACK_PRIORITY_NORMAL);
+    } else {
+      SetThreadpoolCallbackPriority(&m_CallbackEnv, TP_CALLBACK_PRIORITY_LOW);
+    }
+
+    if(IsMultithreadedPerChunk()) {
+      for (UINT i = 0; i < m_uNumberOfChunkThreads; ++i) {
+        SetThreadPriority(&m_aChunkThreads[i - 1], THREAD_PRIORITY_NORMAL);
+      }
+    } else {
+      for (UINT i = 0; i < m_uNumberOfChunkThreads; ++i) {
+        SetThreadPriority(&m_aChunkThreads[i - 1], THREAD_PRIORITY_LOWEST);
+      }
+    }
+  }
 }
 
 XMMATRIX MultithreadedRenderingSample::CalcLightViewProj( int iLight, BOOL bAdapterFOV )

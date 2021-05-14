@@ -83,6 +83,7 @@ add_compile_definitions("WIN32_LEAN_AND_MEAN")
 
 add_link_options("/NODEFAULTLIB:libcmt.lib")
 
+# add_subdirectory(xtest)
 add_subdirectory(Common)
 # add_subdirectory(D3DTutorial)
 add_subdirectory(NBodyGravity)
