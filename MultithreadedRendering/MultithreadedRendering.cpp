@@ -175,7 +175,8 @@ public:
 
 protected:
   enum RENDER_SCHEDULING_OPTIONS: int {
-    RENDER_SCHEDULING_OPTION_ST,
+    RENDER_SCHEDULING_OPTION_NONE,
+    RENDER_SCHEDULING_OPTION_ST, 
     RENDER_SCHEDULING_OPTION_MT_SCENE,
     RENDER_SCHEDULING_OPTION_MT_CHUNK
   };
@@ -341,6 +342,7 @@ private:
   XMMATRIX CalcLightViewProj( int iLight, BOOL bAdapterFOV);
 
   HRESULT InitializeRendererThreadpool();
+  void TuneRendererThreadsByWorkset();
 
   static VOID CALLBACK _PerSceneRenderDeferredProc(
     _Inout_     PTP_CALLBACK_INSTANCE Instance,
@@ -1213,22 +1215,7 @@ void MultithreadedRenderingSample::OnFrameMoved(float fTime, float fElapsed) {
   ImGuiInteractor::OnFrameMoved(m_pd3dDevice);
 
   if(ropts != m_RenderSchedulingOption) {
-    // Fine tune work threads priority
-    if (IsMultithreadedPerScene()) {
-      SetThreadpoolCallbackPriority(&m_CallbackEnv, TP_CALLBACK_PRIORITY_NORMAL);
-    } else {
-      SetThreadpoolCallbackPriority(&m_CallbackEnv, TP_CALLBACK_PRIORITY_LOW);
-    }
-
-    if(IsMultithreadedPerChunk()) {
-      for (UINT i = 0; i < m_uNumberOfChunkThreads; ++i) {
-        SetThreadPriority(&m_aChunkThreads[i - 1], THREAD_PRIORITY_NORMAL);
-      }
-    } else {
-      for (UINT i = 0; i < m_uNumberOfChunkThreads; ++i) {
-        SetThreadPriority(&m_aChunkThreads[i - 1], THREAD_PRIORITY_LOWEST);
-      }
-    }
+    TuneRendererThreadsByWorkset();
   }
 }
 
@@ -2140,5 +2127,26 @@ HRESULT MultithreadedRenderingSample::InitializeRendererThreadpool() {
     }
   }
 
+  TuneRendererThreadsByWorkset();
+
   return hr;
+}
+
+void MultithreadedRenderingSample::TuneRendererThreadsByWorkset() {
+  // Fine tune work threads priority
+  if (IsMultithreadedPerScene()) {
+    SetThreadpoolCallbackPriority(&m_CallbackEnv, TP_CALLBACK_PRIORITY_NORMAL);
+  } else {
+    SetThreadpoolCallbackPriority(&m_CallbackEnv, TP_CALLBACK_PRIORITY_LOW);
+  }
+
+  if (IsMultithreadedPerChunk()) {
+    for (UINT i = 0; i < m_uNumberOfChunkThreads; ++i) {
+      SetThreadPriority(&m_aChunkThreads[i - 1], THREAD_PRIORITY_NORMAL);
+    }
+  } else {
+    for (UINT i = 0; i < m_uNumberOfChunkThreads; ++i) {
+      SetThreadPriority(&m_aChunkThreads[i - 1], THREAD_PRIORITY_LOWEST);
+    }
+  }
 }
