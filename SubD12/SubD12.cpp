@@ -16,6 +16,8 @@ int main() {
   return hr;
 }
 
+using Microsoft::WRL::ComPtr;
+
 class SubD12Sample: public D3D12RendererContext, public WindowInteractor {
 
 private:
@@ -23,6 +25,8 @@ private:
   void OnResizeFrame(int cx, int cy) override;
   void OnFrameMoved(float fTime, float fElapsedTime) override;
   void OnRenderFrame(float fTime, float fElapsedTime) override;
+
+  
 };
 
 HRESULT CreateSubD12Sample(D3D12RendererContext **ppRenderer, WindowInteractor **ppInteractor) {
