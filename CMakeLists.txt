@@ -46,7 +46,6 @@ include_directories(
   ${DIRECTXTEX_SOURCE_DIR}
   ${COMMON_SOURCE_DIR}
   ${THIRD_PARTY_DIR}/dxc/inc # dxc headers
-  ${ASSIMP_INCLUDE_DIRS}
 
   ${IMGUI_SOURCE_DIR}
   ${IMGUI_SOURCE_DIR}/backends
@@ -72,6 +71,10 @@ add_compile_definitions("WIN32_LEAN_AND_MEAN")
 
 add_link_options("/NODEFAULTLIB:libcmt.lib")
 
+<<<<<<< HEAD
+=======
+add_subdirectory(xtest)
+>>>>>>> 4d01c1f9cbf47d93c6fe71be12c5a613481c57b0
 add_subdirectory(Common)
 add_subdirectory(NBodyGravity)
 add_subdirectory(HDRToneMappingCS)
