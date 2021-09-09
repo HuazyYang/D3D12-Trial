@@ -1,3 +1,4 @@
+#include <windows.h>
 #include "Camera.h"
 #include "D3D12RendererContext.hpp"
 #include "DXRHelpers/AccelerationStructureGenerator.h"
@@ -5,7 +6,6 @@
 #include "DXRHelpers/ShaderBindingTableGenerator.h"
 #include "MeshBuffer.h"
 #include "RootSignatureGenerator.h"
-#include "UIController.hpp"
 #include "UploadBuffer.h"
 #include "Win32Application.hpp"
 #include <DirectXColors.h>
@@ -18,11 +18,11 @@
 
 #include "GeometryGenerator.h"
 
-extern void CreateAppInstance(D3D12RendererContext **ppRenderer, IUIController **ppUIController);
+extern void CreateAppInstance(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController);
 
 int main() {
   D3D12RendererContext *pRenderer;
-  IUIController *pUIController;
+  WindowInteractor *pUIController;
   int ret;
 
   CreateAppInstance(&pRenderer, &pUIController);
@@ -148,7 +148,7 @@ struct AccelerationStructureBuffers {
   ComPtr<ID3D12Resource> pInstanceDesc;
 };
 
-class HelloDXRApp : public D3D12RendererContext, public IUIController {
+class HelloDXRApp : public D3D12RendererContext, public WindowInteractor {
 public:
   HelloDXRApp();
   ~HelloDXRApp();
@@ -158,9 +158,7 @@ private:
   void OnFrameMoved(float fTime, float fElapsedTime) override;
   void OnRenderFrame(float fTime, float fEplased) override;
   void OnResizeFrame(int cx, int cy) override;
-  void OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
 
   /// Top AS instance description.
   struct InstanceBuffers {
@@ -228,10 +226,10 @@ private:
   float m_fLightRotationAngle;
   float m_fAnimationTimeElapsed;
 
-  Camera m_Camera;
+  CModelViewerCamera m_Camera;
 };
 
-void CreateAppInstance(D3D12RendererContext **ppRenderer, IUIController **ppUIController) {
+void CreateAppInstance(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController) {
   auto pContext = new HelloDXRApp;
   *ppRenderer = pContext;
   *ppUIController = pContext;
@@ -250,8 +248,6 @@ HelloDXRApp::HelloDXRApp() {
   m_fAnimationTimeElapsed = 0;
 
   memcpy(m_aRTVDefaultClearValue.Color, &DirectX::Colors::LightBlue, sizeof(m_aRTVDefaultClearValue.Color));
-
-  m_Camera.SetOrbit(10.0f, -0.25f * XM_PI, 0.5f * XM_PI);
 }
 
 HelloDXRApp::~HelloDXRApp() {
@@ -296,6 +292,8 @@ HRESULT HelloDXRApp::OnInitPipelines() {
   FlushCommandQueue();
 
   PostInitialize();
+
+  m_Camera.SetViewParams({0.0, 0.0f, -10.0f}, {0.0f, 0.0f, 0.0f});
 
   return hr;
 }
@@ -641,8 +639,16 @@ HRESULT HelloDXRApp::CreateRaytracingPipeline() {
 
   RootSignatureGenerator signatureGen;
   signatureGen.AddConstBufferView(0, 0);
-  signatureGen.AddDescriptorTable({RootSignatureGenerator::ComposeUnorderedAccessViewRange(1, 0),
-                                   RootSignatureGenerator::ComposeShaderResourceViewRange(1, 0)});
+  signatureGen.AddDescriptorTable(
+    {
+      CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_UAV,
+      1,
+      0),
+      CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+      1,
+      0
+      )
+    });
   V_RETURN(
       signatureGen.Generate(m_pd3dDevice, D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE, &m_pRaytracingRootSignature));
 
@@ -655,7 +661,10 @@ HRESULT HelloDXRApp::CreateRaytracingPipeline() {
   signatureGen.AddShaderResourceView(1, 1);
   signatureGen.AddShaderResourceView(2, 1);
   ///  TLAS structure.
-  signatureGen.AddDescriptorTable({RootSignatureGenerator::ComposeShaderResourceViewRange(1, 0)});
+  signatureGen.AddDescriptorTable(
+    {
+      CD3DX12_DESCRIPTOR_RANGE1(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0)
+    });
   V_RETURN(signatureGen.Generate(m_pd3dDevice, D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE, &m_pHitRootSignature));
 
   // The following section associates the root signature to each shader. Note
@@ -829,7 +838,8 @@ HRESULT HelloDXRApp::CreateRaytracingShaderBindingTable(FrameResources *) {
 
 void HelloDXRApp::OnResizeFrame(int cx, int cy) {
 
-  m_Camera.SetProjMatrix(0.25f * XM_PI, GetAspectRatio(), 1.0f, 1000.0f);
+  m_Camera.SetProjParams(0.25f * XM_PI, GetAspectRatio(), 1.0f, 1000.0f);
+  m_Camera.SetWindow(cx, cy);
 
   HRESULT hr;
 
@@ -838,36 +848,18 @@ void HelloDXRApp::OnResizeFrame(int cx, int cy) {
   // V(CreateRaytracingShaderBindingTable());
 }
 
-void HelloDXRApp::OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  switch (ev) {
-  case UI_WM_LBUTTONDOWN:
-    m_ptLastMousePos.x = x;
-    m_ptLastMousePos.y = y;
-    BeginCaptureWindowInput();
-    break;
-  case UI_WM_LBUTTONUP:
-    EndCaptureWindowInput();
-    break;
-  }
-}
+LRESULT HelloDXRApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
 
-void HelloDXRApp::OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  if (keys & UI_MK_LBUTTON) {
-    // Make each pixel correspond to a quarter of a degree.
-    float dx = XMConvertToRadians(0.25f * static_cast<float>(x - m_ptLastMousePos.x));
-    float dy = XMConvertToRadians(0.25f * static_cast<float>(y - m_ptLastMousePos.y));
-    m_Camera.Rotate(dx, dy);
-  }
-  m_ptLastMousePos.x = x;
-  m_ptLastMousePos.y = y;
-}
+  m_Camera.HandleMessages(hwnd, msg, wp, lp);
 
-void HelloDXRApp::OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) {
-  m_Camera.Scale(-0.02f * delta, 3.0f, 15.0f);
+  return 0L;
 }
 
 void HelloDXRApp::OnFrameMoved(float fTime, float fElapsed) {
   HRESULT hr;
+
+  m_Camera.FrameMove(fElapsed, this);
+
   FrameResources *pFrameResources;
 
   m_iCurrentFrameIndex = (m_iCurrentFrameIndex + 1) % s_uNumberOfFrames;
@@ -880,12 +872,12 @@ void HelloDXRApp::OnFrameMoved(float fTime, float fElapsed) {
   FrameConstants frameRes;
   XMMATRIX V, P;
 
-  V = m_Camera.GetView();
-  P = m_Camera.GetProj();
+  V = m_Camera.GetViewMatrix();
+  P = m_Camera.GetProjMatrix();
 
   XMStoreFloat4x4(&frameRes.InvProjection, XMMatrixTranspose(XMMatrixInverse(nullptr, P)));
 
-  frameRes.EyePosW = m_Camera.GetEyePosW();
+  XMStoreFloat3(&frameRes.EyePosW, m_Camera.GetEyePt());
 
   XMMATRIX invV = XMMatrixTranspose(V);
   invV = XMMatrixInverse(nullptr, invV);
@@ -895,7 +887,7 @@ void HelloDXRApp::OnFrameMoved(float fTime, float fElapsed) {
   FrameResources::PerframeBuffer.CopyData(&frameRes, sizeof(FrameConstants), m_iCurrentFrameIndex);
 
   /// Animate light movement and stength.
-  m_fLightRotationAngle += 0.05f * fTime;
+  m_fLightRotationAngle += 0.5f * fElapsed;
 
   XMMATRIX lightRot = XMMatrixRotationY(m_fLightRotationAngle);
   SpotLight spotLight;

@@ -30,21 +30,10 @@ if(MSVC)
 add_compile_options("/MP")
 endif()
 
-#  assimp
-cmake_policy(SET CMP0012 NEW)
-find_package(assimp REQUIRED)
-if(NOT assimp_FOUND)
-message(FATAL_ERROR "Could not find assimp")
-else()
-message(STATUS "assimp library: ${ASSIMP_INCLUDE_DIRS}")
-endif()
-
 set(THIRD_PARTY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../ThirdParty")
 set(COMMON_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/Common)
 set(DIRECTXTEX_SOURCE_DIR ${THIRD_PARTY_DIR}/DirectXTex/DirectXTex)
 set(D3D12MEMORYALLOCATOR_SOURCE_DIR ${THIRD_PARTY_DIR}/D3D12MemoryAllocator/src)
-set(ASSIMP_INCLUDE_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/include)
-set(ASSIMP_CONFIG_DIR ${THIRD_PARTY_DIR}/assimp-5.0.1/build/include)
 set(IMGUI_SOURCE_DIR ${THIRD_PARTY_DIR}/imgui) # For ImGui
 
 set(HLSL_SHADER_MODEL_VERSION 6_0)
@@ -83,12 +72,10 @@ add_compile_definitions("WIN32_LEAN_AND_MEAN")
 
 add_link_options("/NODEFAULTLIB:libcmt.lib")
 
-# add_subdirectory(xtest)
 add_subdirectory(Common)
-# add_subdirectory(D3DTutorial)
 add_subdirectory(NBodyGravity)
-# add_subdirectory(HDRToneMappingCS)
-# add_subdirectory(HelloDXR)
+add_subdirectory(HDRToneMappingCS)
+add_subdirectory(HelloDXR)
 add_subdirectory(LoadModel)
 add_subdirectory(MultithreadedRendering)
 

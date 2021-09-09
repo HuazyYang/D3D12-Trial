@@ -14,6 +14,7 @@
 #include <imgui_impl_dx12.h>
 #include <DirectXCollision.h>
 #include <ShlObj.h>
+#include <process.h>
 
 #undef min
 #undef max
@@ -547,7 +548,7 @@ HRESULT MultithreadedRenderingSample::CreateFrameResources() {
 
     auto &frameResources = m_aFrameResources[findex];
 
-    V_RETURN(frameResources.ConstBufferStack.Initialize(m_pd3dDevice, (1 << 12), 1));
+    V_RETURN(frameResources.ConstBufferStack.Initialize(m_pd3dDevice, (1 << 14), 1));
     V_RETURN(m_pd3dDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                                   IID_PPV_ARGS(&frameResources.CommandAllocator)));
     for(int i = 0; i < s_iNumShadows; ++i) {

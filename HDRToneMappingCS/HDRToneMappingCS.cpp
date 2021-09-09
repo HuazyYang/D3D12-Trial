@@ -82,7 +82,7 @@ UploadBuffer FrameResources::SkyboxCBs;
 UploadBuffer FrameResources::BoomGaussWeightsCBs;
 UploadBuffer FrameResources::BoomCSCBs;
 
-class HDRToneMappingCSApp : public D3D12RendererContext, public IUIController {
+class HDRToneMappingCSApp : public D3D12RendererContext, public WindowInteractor {
 public:
   HDRToneMappingCSApp();
   ~HDRToneMappingCSApp();
@@ -94,10 +94,7 @@ private:
   void OnRenderFrame(float fTime, float fTimeElasped) override;
 
   void OnResizeFrame(int cx, int cy) override;
-  void OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnKeyEvent(int downUp, unsigned short key, int repeatCnt) override;
-  void OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) override;
-  void OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
 
   UINT GetExtraRTVDescriptorCount() const override;
 
@@ -154,7 +151,7 @@ private:
 
   MeshBuffer *m_pSkyboxBuffer = nullptr;
 
-  SimpleOrbitCamera m_Camera;
+  CModelViewerCamera m_Camera;
 
   int m_iCurrentFrameIndex = 0;
 
@@ -166,7 +163,7 @@ private:
   POINT m_ptLastMousePos;
 };
 
-void CreateAppInstance(D3D12RendererContext **ppRenderer, IUIController **ppUIController) {
+void CreateAppInstance(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController) {
   HDRToneMappingCSApp *pContext = new HDRToneMappingCSApp;
   *ppRenderer = pContext;
   *ppUIController = pContext;
@@ -213,6 +210,7 @@ HRESULT HDRToneMappingCSApp::OnInitPipelines() {
   HRESULT hr;
 
   /// Reset the command list to prepare for initalization commands.
+  m_pd3dDirectCmdAlloc->Reset();
   m_pd3dCommandList->Reset(m_pd3dDirectCmdAlloc, nullptr);
 
   V_RETURN(CreateGeometryBuffers());
@@ -237,7 +235,6 @@ HRESULT HDRToneMappingCSApp::OnInitPipelines() {
   PostInitialize();
 
   m_Camera.SetViewParams({0.0f, -10.5f, -3.0f}, {0.0f, 0.0f, 0.0f});
-  m_Camera.SetProjMatrix(XM_PIDIV4, GetAspectRatio(), 0.1f, 5000.0f);
 
   return hr;
 }
@@ -788,6 +785,8 @@ HRESULT HDRToneMappingCSApp::CreateDescriptors() {
 
 void HDRToneMappingCSApp::OnFrameMoved(float fTime, float fTimeElapsed) {
 
+  m_Camera.FrameMove(fTimeElapsed, this);
+
   FrameResources *pFrameResources;
 
   m_iCurrentFrameIndex = (m_iCurrentFrameIndex + 1) % 3;
@@ -799,7 +798,7 @@ void HDRToneMappingCSApp::OnFrameMoved(float fTime, float fTimeElapsed) {
   SkyboxRenderParams skyboxRenderParams;
   XMMATRIX matWVP;
 
-  matWVP = XMLoadFloat4x4(&m_Camera.GetViewProj());
+  matWVP = m_Camera.GetViewMatrix() * m_Camera.GetProjMatrix();
   matWVP = XMMatrixInverse(nullptr, matWVP);
   XMStoreFloat4x4(&skyboxRenderParams.MatWorldViewProj, matWVP);
 
@@ -1070,7 +1069,8 @@ void HDRToneMappingCSApp::RenderFinalScreenQuad() {
 
 void HDRToneMappingCSApp::OnResizeFrame(int cx, int cy) {
 
-  m_Camera.SetProjMatrix(XM_PIDIV4, GetAspectRatio(), 0.1f, 5000.0f);
+  m_Camera.SetProjParams(XM_PIDIV4, GetAspectRatio(), 0.1f, 5000.0f);
+  m_Camera.SetWindow(cx, cy);
 
   m_pd3dDirectCmdAlloc->Reset();
   m_pd3dCommandList->Reset(m_pd3dDirectCmdAlloc, nullptr);
@@ -1106,42 +1106,19 @@ void HDRToneMappingCSApp::OnResizeFrame(int cx, int cy) {
   FrameResources::BoomCSCBs.CopyData(&boomCSParams2, sizeof(BoomCSParams), 1);
 }
 
-void HDRToneMappingCSApp::OnMouseButtonEvent(UI_MOUSE_BUTTON_EVENT ev, UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  switch (ev) {
-  case UI_WM_LBUTTONDOWN:
-    m_ptLastMousePos.x = x;
-    m_ptLastMousePos.y = y;
-    BeginCaptureWindowInput();
-    break;
-  case UI_WM_LBUTTONUP:
-    EndCaptureWindowInput();
-    break;
-  }
-}
-
-void HDRToneMappingCSApp::OnMouseMove(UI_MOUSE_VIRTUAL_KEY keys, int x, int y) {
-  if (keys & UI_MK_LBUTTON) {
-    // Make each pixel correspond to a quarter of a degree.
-    float dx = XMConvertToRadians(0.25f * static_cast<float>(x - m_ptLastMousePos.x));
-    float dy = XMConvertToRadians(0.25f * static_cast<float>(y - m_ptLastMousePos.y));
-    m_Camera.Rotate(dx, dy);
+LRESULT HDRToneMappingCSApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+  
+  if(msg == WM_KEYDOWN) {
+    if (wp == L'B' || wp == L'b') {
+      m_bBoom ^= 1;
+    } else if (wp == L'P' || wp == L'p') {
+      m_bPostProcessON ^= 1;
+    } else if (wp == L'G' || wp == L'g') {
+      m_bBlur ^= 1;
+    }
   }
 
-  m_ptLastMousePos.x = x;
-  m_ptLastMousePos.y = y;
-}
+  m_Camera.HandleMessages(hwnd, msg, wp, lp);
 
-void HDRToneMappingCSApp::OnMouseWheel(UI_MOUSE_VIRTUAL_KEY keys, int delta, int x, int y) {
-  m_Camera.Scale(0.02f * delta, 10.0f, 500000.f);
-}
-
-void HDRToneMappingCSApp::OnKeyEvent(int downUp, unsigned short key, int repeatCnt) {
-
-  if (key == L'B' || key == L'b') {
-    m_bBoom ^= 1;
-  } else if (key == L'P' || key == L'p') {
-    m_bPostProcessON ^= 1;
-  } else if (key == L'G' || key == L'g') {
-    m_bBlur ^= 1;
-  }
+  return 0L;
 }
