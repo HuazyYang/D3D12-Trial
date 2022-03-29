@@ -243,12 +243,13 @@ protected:
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::Begin("Rendering opts", nullptr, ImGuiWindowFlags_NoBackground|ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::RadioButton("ST Def", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_ST);
-    ImGui::RadioButton("MT Def/Scene", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_SCENE);
-    ImGui::RadioButton("MT Def/Chunk", (int*)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_CHUNK);
-    ImGui::Separator();
-    ImGui::CheckboxFlags("Enable tight mirror stencil clipping space", &m_bOptmizeMirrorClipSpace, TRUE);
+    if (ImGui::Begin("Rendering opts", nullptr, ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_AlwaysAutoResize)) {
+      ImGui::RadioButton("ST Def", (int *)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_ST);
+      ImGui::RadioButton("MT Def/Scene", (int *)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_SCENE);
+      ImGui::RadioButton("MT Def/Chunk", (int *)&m_RenderSchedulingOption, RENDER_SCHEDULING_OPTION_MT_CHUNK);
+      ImGui::Separator();
+      ImGui::CheckboxFlags("Enable tight mirror stencil clipping space", &m_bOptmizeMirrorClipSpace, TRUE);
+    }
     ImGui::End();
 
     EndInteraction();
@@ -265,12 +266,14 @@ protected:
     EndInteraction();
   }
 
-  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override {
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override {
     // Forward declare message handler from imgui_impl_win32.cpp
     extern LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     BeginInteraction();
-    LRESULT ret = ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
+
+    LRESULT ret = 0;
+    ret = ImGui_ImplWin32_WndProcHandler(hwnd, msg, wp, lp);
     EndInteraction();
     return ret;
   }
@@ -328,7 +331,7 @@ private:
   void OnPerChunkRenderDeferred(int chunkIndex, FrameResources* const* ppFrameResources);
 
   // UI
-  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override;
 
   HRESULT CreatePSOs();
   HRESULT LoadModel();
@@ -1924,14 +1927,14 @@ unsigned int WINAPI MultithreadedRenderingSample::_PerChunkRenderDeferredProc(LP
   return 0;
 }
 
-LRESULT MultithreadedRenderingSample::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+LRESULT MultithreadedRenderingSample::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   if(msg == WM_KEYDOWN && wp == VK_F4) {
     m_bRenderSceneLightPOV ^= 1;
   }
 
   m_Camera.HandleMessages(hwnd, msg, wp, lp);
-  return ImGuiInteractor::OnMsgProc(hwnd, msg, wp, lp, pbNoFurtherProcessing);
+  return ImGuiInteractor::OnMsgProc(hwnd, msg, wp, lp);
 }
 
 //  Helper function to count bits in the processor mask

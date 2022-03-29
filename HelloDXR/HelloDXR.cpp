@@ -13,19 +13,20 @@
 #include <DirectXPackedVector.h>
 #include <array>
 #include <wrl.h>
+#include <dxc/inc/d3d12shader.h>
 
 #include "Camera.h"
 
 #include "GeometryGenerator.h"
 
-extern void CreateAppInstance(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController);
+extern void CreateToneMappingCSRenderer(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController);
 
 int main() {
   D3D12RendererContext *pRenderer;
   WindowInteractor *pUIController;
   int ret;
 
-  CreateAppInstance(&pRenderer, &pUIController);
+  CreateToneMappingCSRenderer(&pRenderer, &pUIController);
   ret = RunSample(pRenderer, pUIController, 800, 600, L"HelloDXR");
   SAFE_DELETE(pRenderer);
   return ret;
@@ -158,7 +159,7 @@ private:
   void OnFrameMoved(float fTime, float fElapsedTime) override;
   void OnRenderFrame(float fTime, float fEplased) override;
   void OnResizeFrame(int cx, int cy) override;
-  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override;
 
   /// Top AS instance description.
   struct InstanceBuffers {
@@ -221,15 +222,13 @@ private:
   FrameResources m_aFrameResources[s_uNumberOfFrames];
   UINT m_iCurrentFrameIndex;
 
-  POINT m_ptLastMousePos;
-
   float m_fLightRotationAngle;
   float m_fAnimationTimeElapsed;
 
   CModelViewerCamera m_Camera;
 };
 
-void CreateAppInstance(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController) {
+void CreateToneMappingCSRenderer(D3D12RendererContext **ppRenderer, WindowInteractor **ppUIController) {
   auto pContext = new HelloDXRApp;
   *ppRenderer = pContext;
   *ppUIController = pContext;
@@ -384,7 +383,7 @@ HRESULT HelloDXRApp::CreateGeometryBuffer() {
   std::vector<Vertex> mengerVertices;
   std::vector<UINT> mengerIndices;
 
-  GenerateMengerSponge(3, 0.75f, mengerVertices, mengerIndices);
+  GenerateMengerSponge(4, 0.75f, mengerVertices, mengerIndices);
 
   V_RETURN(CreateMeshBuffer(&pMeshBuffer));
   V_RETURN(pMeshBuffer->CreateVertexBuffer(m_pd3dDevice, m_pd3dCommandList, mengerVertices.data(),
@@ -606,17 +605,67 @@ HRESULT HelloDXRApp::CreateRaytracingPipeline() {
 
   V_RETURN(compilerWrapper.CreateCompiler());
 
-  V_RETURN(compilerWrapper.CompileFromFile(L"Shaders/HelloDXR_Simple.hlsl", L"", L"lib_6_3", nullptr, 0, nullptr, 0,
-                                           nullptr, pDxil.GetAddressOf(), nullptr));
+  V_RETURN(compilerWrapper.CompileFromFile(L"Shaders/HelloDXR_Simple.hlsl", L"", L"lib_6_3", nullptr, 0,
+                                           nullptr, 0, nullptr, pDxil.GetAddressOf(), nullptr));
 
   RayTracingPipelineGenerator rtxpipeline;
 
-  // In a way similar to DLLs, each library is associated with a number of
-  // exported symbols. This
-  // has to be done explicitly in the lines below. Note that a single library
-  // can contain an arbitrary number of symbols, whose semantic is given in HLSL
-  // using the [shader("xxx")] syntax
-  rtxpipeline.AddLibrary(pDxil.Get(), {L"GenerateRay", L"Miss", L"ClosestHit", L"ShadowMiss"});
+  ComPtr<IDxcContainerReflection> pReflection;
+  V_RETURN(DxcCreateInstance(CLSID_DxcContainerReflection, IID_PPV_ARGS(&pReflection)));
+
+  V_RETURN(pReflection->Load(pDxil.Get()));
+
+  UINT32 shaderIdx;
+
+  V_RETURN(pReflection->FindFirstPartKind(DXC_PART_DXIL, &shaderIdx));
+
+  ComPtr<ID3D12LibraryReflection> pDxilReflection;
+
+  V_RETURN(pReflection->GetPartReflection(shaderIdx, IID_PPV_ARGS(&pDxilReflection)));
+
+  D3D12_LIBRARY_DESC dxilDesc;
+  V_RETURN(pDxilReflection->GetDesc(&dxilDesc));
+
+  for(int i = 0; i < dxilDesc.FunctionCount; ++i) {
+    auto pFunc =  pDxilReflection->GetFunctionByIndex(i);
+
+    D3D12_FUNCTION_DESC funcDesc;
+    pFunc->GetDesc(&funcDesc);
+
+    for(int j = 0; j < funcDesc.BoundResources; ++j) {
+      D3D12_SHADER_INPUT_BIND_DESC bindDesc;
+      pFunc->GetResourceBindingDesc(j, &bindDesc);
+
+      DX_TRACEW(L"Variable name: %S, binding: %d, space: %d\n", bindDesc.Name, bindDesc.BindPoint,
+        bindDesc.Space);
+    }
+  }
+
+  // ComPtr<IDxcBlob> pReflectionData;
+  // V_RETURN(pReflectionData0->QueryInterface(IID_PPV_ARGS(&pReflectionData)));
+
+  // ComPtr<IDxcUtils> pUtils;
+  // V_RETURN(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&pUtils)));
+
+  // ComPtr<ID3D12ShaderReflection> pShaderReflection;
+
+  // DxcBuffer buffer = { pReflectionData->GetBufferPointer(), pReflectionData->GetBufferSize(), 0 };
+  // V_RETURN(pUtils->CreateReflection(&buffer, IID_PPV_ARGS(&pShaderReflection)));
+
+  // D3D12_SHADER_DESC shaderDesc;
+  // V_RETURN(pShaderReflection->GetDesc(&shaderDesc));
+
+  // for (int i = 0; i < shaderDesc.BoundResources; ++i) {
+  //   D3D12_SHADER_INPUT_BIND_DESC bindDesc;
+  //   V(pShaderReflection->GetResourceBindingDesc(i, &bindDesc));
+  // }
+
+    // In a way similar to DLLs, each library is associated with a number of
+    // exported symbols. This
+    // has to be done explicitly in the lines below. Note that a single library
+    // can contain an arbitrary number of symbols, whose semantic is given in HLSL
+    // using the [shader("xxx")] syntax
+    rtxpipeline.AddLibrary(pDxil.Get(), {L"GenerateRay", L"Miss", L"ClosestHit", L"ShadowMiss"});
   // 3 different shaders can be invoked to obtain an intersection: an
   // intersection shader is called
   // when hitting the bounding box of non-triangular geometry. This is beyond
@@ -848,7 +897,7 @@ void HelloDXRApp::OnResizeFrame(int cx, int cy) {
   // V(CreateRaytracingShaderBindingTable());
 }
 
-LRESULT HelloDXRApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+LRESULT HelloDXRApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   m_Camera.HandleMessages(hwnd, msg, wp, lp);
 
@@ -887,7 +936,7 @@ void HelloDXRApp::OnFrameMoved(float fTime, float fElapsed) {
   FrameResources::PerframeBuffer.CopyData(&frameRes, sizeof(FrameConstants), m_iCurrentFrameIndex);
 
   /// Animate light movement and stength.
-  m_fLightRotationAngle += 0.5f * fElapsed;
+  m_fLightRotationAngle +=  fElapsed;
 
   XMMATRIX lightRot = XMMatrixRotationY(m_fLightRotationAngle);
   SpotLight spotLight;

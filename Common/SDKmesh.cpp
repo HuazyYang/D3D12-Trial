@@ -320,11 +320,9 @@ HRESULT CDXUTSDKMesh::CreateFromFile( ResourceUploadBatch* pUploadBatch,
         return HRESULT_FROM_WIN32(GetLastError());
 
     // Change the path to just the directory
-    WCHAR* pLastBSlash = wcsrchr( m_strPathW, L'\\' );
-    if( pLastBSlash )
-        *( pLastBSlash + 1 ) = L'\0';
-    else
-        *m_strPathW = L'\0';
+    WCHAR szDrive[_MAX_DRIVE], szDir[_MAX_DIR];
+    _wsplitpath_s(m_strPathW, szDrive, _MAX_DRIVE, szDir, _MAX_DIR, nullptr, 0, nullptr, 0);
+    _wmakepath_s(m_strPathW, szDrive, szDir, L"\\", nullptr);
 
     WideCharToMultiByte( CP_ACP, 0, m_strPathW, -1, m_strPath, MAX_PATH, nullptr, FALSE );
 

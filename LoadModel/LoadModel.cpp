@@ -75,7 +75,7 @@ public:
   void OnRenderFrame(float fTime, float fElapedTime) override;
 
 private:
-  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override;
 
   HRESULT LoadModel();
   HRESULT CreatePSOs();
@@ -282,7 +282,7 @@ void LoadModelSample::OnRenderFrame(float fTime, float fElapsedTime) {
   Present();
 }
 
-LRESULT LoadModelSample::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+LRESULT LoadModelSample::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   LRESULT ret = 0;
 

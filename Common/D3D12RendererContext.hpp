@@ -21,6 +21,8 @@ public:
   HRESULT SetFullscreenMode(BOOL bFullScreen);
   RECT GetSwapchainContainingOutputDesktopCoordinates() const;
 
+  LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
+
 protected:
   void ModifyPreset();
   ///
@@ -33,6 +35,7 @@ protected:
   virtual void OnRenderFrame(float fTime, float fElapsedTime) {}
   virtual void OnResizeFrame(int cx, int cy) {}
   virtual void OnDestroy() {}
+  virtual LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) { return 0; }
   /// Override the RTV and DSV descriptor size.
   virtual UINT GetExtraRTVDescriptorCount() const;
   virtual UINT GetExtraDSVDescriptorCount() const;

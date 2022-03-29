@@ -27,7 +27,7 @@ public:
   void ToggleFullscreenWindow(_In_opt_ LPCRECT pDesktopCoordinates);
   BOOL GetFullscreenState() const;
 
-  virtual LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing);
+  virtual LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) { return 0; }
 
 protected:
   friend int RunSample(

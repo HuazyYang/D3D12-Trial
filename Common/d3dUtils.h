@@ -91,7 +91,7 @@ extern void DXOutputDebugStringW(LPCWSTR fmt, ...);
 inline ptrdiff_t AlignUp(ptrdiff_t ptr, size_t alignment) {
   size_t mask = alignment - 1;
   RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
-  if((alignment & mask) != 0)
+  if((ptr & mask) != 0)
     ptr = (ptr + mask) & ~mask;
   return ptr;
 }
@@ -99,7 +99,7 @@ inline ptrdiff_t AlignUp(ptrdiff_t ptr, size_t alignment) {
 inline ptrdiff_t AlignDown(ptrdiff_t ptr, size_t alignment) {
   size_t mask = alignment - 1;
   RT_ASSERT((alignment & mask) == 0 && "alignment must be pow of 2");
-  if((alignment & mask) != 0)
+  if((ptr & mask) != 0)
     ptr = ptr & ~mask;
   return ptr;
 }
@@ -137,9 +137,6 @@ namespace d3dUtils {
     ~DxcCompilerWrapper();
 
     HRESULT CreateCompiler();
-    HRESULT CreateIncludeHandler(
-      _COM_Outptr_ IDxcIncludeHandler **pIncludeHandler
-    );
 
     HRESULT CompileFromFile(
       _In_ LPCWSTR pFileNname,                      // Source text to compile

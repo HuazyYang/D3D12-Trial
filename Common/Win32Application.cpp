@@ -115,12 +115,6 @@ BOOL WindowInteractor::GetFullscreenState() const {
   return m_bFullscreenState;
 }
 
-LRESULT WindowInteractor::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
-
-  *pbNoFurtherProcessing = false;
-  return 0;
-}
-
 struct _WindowContext {
   D3D12RendererContext *pRenderer;
   WindowInteractor *pInteractor;
@@ -317,14 +311,12 @@ LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     break;
   }
 
-  LRESULT ret = 0;
-  bool bNoFurtherProcessing = false;
-  if(pWndContext)
-    ret = pWndContext->pInteractor->OnMsgProc(hwnd, msg, wp, lp, &bNoFurtherProcessing);
-
-  if(!bNoFurtherProcessing) {
-    ret = DefWindowProc(hwnd, msg, wp, lp);
+  LRESULT ret = -1;
+  if(pWndContext) {
+    ret = pWndContext->pRenderer->MsgProc(hwnd, msg, wp, lp);
+    ret = pWndContext->pInteractor->OnMsgProc(hwnd, msg, wp, lp);
   }
+  ret = DefWindowProc(hwnd, msg, wp, lp);
 
   return ret;
 }

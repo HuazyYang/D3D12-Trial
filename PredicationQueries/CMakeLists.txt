@@ -1,10 +1,11 @@
-project(HelloDXR)
+project(PredicationQueries VERSION 0.0.1)
 
 set(${PROJECT_NAME}_src_files
-  HelloDXR.cpp
+  PredicationQueries.cpp
 )
 
 file(GLOB ${PROJECT_NAME}_shader_files Shaders/*.hlsl)
+source_group(Shaders ${${PROJECT_NAME}_shader_files})
 
 add_executable(
   ${PROJECT_NAME}

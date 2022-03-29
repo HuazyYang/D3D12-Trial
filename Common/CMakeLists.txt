@@ -86,7 +86,7 @@ source_group(D3D12MemAlloc ${D3D12MemoryAllocatorSrc})
 
 target_link_libraries(
   ${PROJECT_NAME}
-  DirectXTex
+  Microsoft::DirectXTex
   d3d12
   dxgi
   dxguid

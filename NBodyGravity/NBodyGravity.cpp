@@ -91,7 +91,7 @@ private:
   void OnRenderFrame(float fTime, float fElapsedTime) override;
 
   void OnResizeFrame(int cx, int cy) override;
-  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override;
 
   HRESULT LoadTexture();
   HRESULT CreateParticleBuffers();
@@ -628,7 +628,7 @@ void NBodyGravityApp::OnResizeFrame(int cx, int cy) {
   m_Camera.SetButtonMasks(0, MOUSE_WHEEL, MOUSE_LEFT_BUTTON|MOUSE_MIDDLE_BUTTON|MOUSE_RIGHT_BUTTON);
 }
 
-LRESULT NBodyGravityApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+LRESULT NBodyGravityApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
   LRESULT ret = 0;
 

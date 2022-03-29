@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "configurePresets": [
+    {
+      "name": "x64-windows",
+      "displayName": "x64-windows, Ninja-MultiConfig",
+      "description": "Sets Ninja generator, build and install directory",
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_PREFIX_PATH": "${workspaceFolder}/../ThirdParty/DirectXTex/build/installed/x64-windows-static/cmake;",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/install/${presetName}"
+      },
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "external"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [ "Windows" ],
+          "intelliSenseMode": "windows-msvc-x64"
+        }
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-windows-debug",
+      "description": "x64-windows, Debug",
+      "displayName": "x64-windows-debug",
+      "configurePreset": "x64-windows",
+      "configuration": "Debug"
+    },
+    {
+      "name": "x64-windows-release",
+      "description": "x64-windows, Release",
+      "displayName": "x64-windows-release",
+      "configurePreset": "x64-windows",
+      "configuration": "Release"
+    }
+  ]
+}

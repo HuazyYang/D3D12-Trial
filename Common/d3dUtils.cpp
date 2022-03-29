@@ -173,18 +173,6 @@ namespace d3dUtils {
     return hr;
   }
 
-  HRESULT DxcCompilerWrapper::CreateIncludeHandler(IDxcIncludeHandler **ppIncludeHandler) {
-
-    HRESULT hr;
-
-    if (!m_pDxcLibrary)
-      V_RETURN(E_INVALIDARG);
-
-    V_RETURN(m_pDxcLibrary->CreateIncludeHandler(ppIncludeHandler));
-
-    return hr;
-  }
-
   HRESULT DxcCompilerWrapper::CompileFromFile(
     _In_ LPCWSTR pFileName,
     _In_ LPCWSTR pEntryPoint,
@@ -218,6 +206,7 @@ namespace d3dUtils {
     /// Verify the result.
     HRESULT resultCode;
     V_RETURN(pResult->GetStatus(&resultCode));
+
     if (FAILED(resultCode)) {
       Microsoft::WRL::ComPtr<IDxcBlobEncoding> pErrorBlob;
       pResult->GetErrorBuffer(pErrorBlob.GetAddressOf());

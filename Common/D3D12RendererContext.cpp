@@ -664,3 +664,7 @@ void D3D12RendererContext::Update(float fTime, float fElapsedTime) {
 void D3D12RendererContext::RenderFrame(float fTime, float fElaspedTime) {
   this->OnRenderFrame(fTime, fElaspedTime);
 }
+
+LRESULT D3D12RendererContext::MsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+  return this->OnMsgProc(hwnd, msg, wp, lp);
+}

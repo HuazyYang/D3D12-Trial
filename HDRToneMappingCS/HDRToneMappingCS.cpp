@@ -94,7 +94,7 @@ private:
   void OnRenderFrame(float fTime, float fTimeElasped) override;
 
   void OnResizeFrame(int cx, int cy) override;
-  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) override;
+  LRESULT OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) override;
 
   UINT GetExtraRTVDescriptorCount() const override;
 
@@ -1106,7 +1106,7 @@ void HDRToneMappingCSApp::OnResizeFrame(int cx, int cy) {
   FrameResources::BoomCSCBs.CopyData(&boomCSParams2, sizeof(BoomCSParams), 1);
 }
 
-LRESULT HDRToneMappingCSApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, bool *pbNoFurtherProcessing) {
+LRESULT HDRToneMappingCSApp::OnMsgProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
   
   if(msg == WM_KEYDOWN) {
     if (wp == L'B' || wp == L'b') {
